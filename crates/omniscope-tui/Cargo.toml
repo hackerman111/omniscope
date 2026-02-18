@@ -1,0 +1,15 @@
+[package]
+name = "omniscope-tui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "TUI interface for Omniscope book manager"
+
+[dependencies]
+omniscope-core = { workspace = true }
+ratatui = { workspace = true }
+crossterm = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
