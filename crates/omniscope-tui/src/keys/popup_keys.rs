@@ -267,6 +267,13 @@ pub(crate) fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModif
                         app.telescope_search(&q);
                         app.update_telescope_suggestions();
                     }
+                    KeyCode::Char('q') if modifiers.contains(KeyModifiers::CONTROL) => {
+                        app.quickfix_list = state.results.clone();
+                        app.quickfix_show = true;
+                        app.popup = None; // close telescope
+                        app.quickfix_selected = 0;
+                        app.status_message = format!("Sent {} items to quickfix", app.quickfix_list.len());
+                    }
                     KeyCode::Backspace => {
                         state.delete_back();
                         let q = state.query.clone();
@@ -303,7 +310,10 @@ pub(crate) fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModif
                 },
 
                 TelescopeMode::Normal => match code {
-                    KeyCode::Esc | KeyCode::Char('q') => {
+                    KeyCode::Esc => {
+                        app.popup = None;
+                    }
+                    KeyCode::Char('q') if modifiers.is_empty() => {
                         app.popup = None;
                     }
                     KeyCode::Char('i') => {
@@ -344,6 +354,13 @@ pub(crate) fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModif
                     KeyCode::Char('u') if modifiers.contains(KeyModifiers::CONTROL) => {
                         state.result_up(); state.half_page_up(20);
                     }
+                    KeyCode::Char('q') if modifiers.contains(KeyModifiers::CONTROL) => {
+                        app.quickfix_list = state.results.clone();
+                        app.quickfix_show = true;
+                        app.popup = None;
+                        app.quickfix_selected = 0;
+                        app.status_message = format!("Sent {} items to quickfix", app.quickfix_list.len());
+                    }
                     _ => { state.pending_g = false; }
                 },
             }
@@ -351,6 +368,27 @@ pub(crate) fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModif
 
         Some(Popup::Help) => {
             app.popup = None;
+        }
+
+        Some(Popup::EasyMotion(state)) => {
+            let state_clone = state.clone(); // Clone to avoid borrow checker issues
+            match code {
+                KeyCode::Esc => {
+                    app.popup = None;
+                    app.status_message = "EasyMotion cancelled".to_string();
+                }
+                KeyCode::Char(c) => {
+                    if let Some(&(_, idx)) = state_clone.targets.iter().find(|&&(tc, _)| tc == c) {
+                        app.selected_index = idx;
+                        app.popup = None;
+                        app.status_message = "EasyMotion jump success".to_string();
+                    } else {
+                        app.popup = None;
+                        app.status_message = "EasyMotion target not found".to_string();
+                    }
+                }
+                _ => {}
+            }
         }
 
         None => {}

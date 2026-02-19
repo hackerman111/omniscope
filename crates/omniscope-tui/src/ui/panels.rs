@@ -151,13 +151,22 @@ fn render_book_list(frame: &mut Frame, app: &App, area: Rect) {
         .map(|(i, book)| {
             let is_selected = i == app.selected_index;
             let is_visual = app.visual_selections.contains(&i);
-            let prefix = if is_selected && is_focused {
-                "▶ "
+            let mut prefix_str = if is_selected && is_focused {
+                "▶ ".to_string()
             } else if is_visual {
-                "● "
+                "● ".to_string()
             } else {
-                "  "
+                "  ".to_string()
             };
+
+            let mut prefix_style = Style::default().fg(colors::LAVENDER);
+
+            if let Some(crate::popup::Popup::EasyMotion(ref state)) = app.popup {
+                if let Some(&(c, _)) = state.targets.iter().find(|&&(_, idx)| idx == i) {
+                    prefix_str = format!("[{c}]");
+                    prefix_style = Style::default().fg(colors::RED).add_modifier(Modifier::BOLD);
+                }
+            }
 
             let status_icon = match book.read_status {
                 omniscope_core::ReadStatus::Read => "✓",
@@ -187,7 +196,7 @@ fn render_book_list(frame: &mut Frame, app: &App, area: Rect) {
 
             let max_title = (inner.width as usize).saturating_sub(30);
             let line = Line::from(vec![
-                Span::styled(prefix, Style::default().fg(colors::LAVENDER)),
+                Span::styled(prefix_str, prefix_style),
                 Span::styled(status_icon, Style::default().fg(match book.read_status {
                     omniscope_core::ReadStatus::Read => colors::GREEN,
                     omniscope_core::ReadStatus::Reading => colors::YELLOW,
@@ -323,4 +332,52 @@ fn render_preview(frame: &mut Frame, app: &App, area: Rect) {
 
     let preview = Paragraph::new(content).block(block).wrap(Wrap { trim: false });
     frame.render_widget(preview, area);
+}
+
+pub(crate) fn render_quickfix(frame: &mut Frame, app: &App, area: Rect) {
+    let title = format!(" Quickfix ({}) - :cnext/:cprev/:cdo ", app.quickfix_list.len());
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(colors::RED))
+        .style(Style::default().bg(colors::BASE));
+
+    if app.quickfix_list.is_empty() {
+        let empty_msg = Paragraph::new("  Quickfix list is empty (use Ctrl+q to populate)").block(block);
+        frame.render_widget(empty_msg, area);
+        return;
+    }
+
+    let inner = block.inner(area);
+    let visible_height = inner.height as usize;
+    let scroll_offset = if app.quickfix_selected >= visible_height {
+        app.quickfix_selected.saturating_sub(visible_height - 1)
+    } else {
+        0
+    };
+
+    let items: Vec<ListItem> = app.quickfix_list
+        .iter()
+        .enumerate()
+        .skip(scroll_offset)
+        .take(visible_height)
+        .map(|(i, book)| {
+            let is_selected = i == app.quickfix_selected;
+            let prefix = if is_selected { "▶ " } else { "  " };
+            let max_title = (inner.width as usize).saturating_sub(10);
+            let line = Line::from(vec![
+                Span::styled(prefix, Style::default().fg(colors::RED)),
+                Span::styled(truncate(&book.title, max_title), Style::default().fg(colors::TEXT)),
+            ]);
+            let style = if is_selected {
+                Style::default().bg(colors::SURFACE0)
+            } else {
+                Style::default()
+            };
+            ListItem::new(line).style(style)
+        })
+        .collect();
+
+    let list = List::new(items).block(block);
+    frame.render_widget(list, area);
 }

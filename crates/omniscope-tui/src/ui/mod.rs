@@ -42,13 +42,78 @@ pub fn render(frame: &mut Frame, app: &App) {
         .split(size);
 
     render_header(frame, app, main_layout[0]);
-    panels::render_body(frame, app, main_layout[1]);
+    if app.quickfix_show {
+        let body_and_qf = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Min(3),
+                Constraint::Length(10.min(main_layout[1].height / 3)), // up to 1/3 of screen
+            ])
+            .split(main_layout[1]);
+        panels::render_body(frame, app, body_and_qf[0]);
+        panels::render_quickfix(frame, app, body_and_qf[1]);
+    } else {
+        panels::render_body(frame, app, main_layout[1]);
+    }
     render_status_bar(frame, app, main_layout[2]);
 
     // Popup overlay (on top of everything)
     if let Some(ref popup) = app.popup {
         popups::render_popup(frame, popup, size);
     }
+    
+    // Key Hints overlay (contextual)
+    let show_hints = app.pending_key.is_some() 
+        || app.pending_operator.is_some() 
+        || app.mode == Mode::Visual || app.mode == Mode::VisualLine || app.mode == Mode::VisualBlock
+        || app.pending_register_select;
+
+    if show_hints {
+         render_key_hints(frame, app, size);
+    }
+}
+
+fn render_key_hints(frame: &mut Frame, app: &App, area: Rect) {
+    use crate::keys::hints::get_hints;
+    let hints = get_hints(app);
+    if hints.is_empty() { return; }
+    
+    // Calculate height needed (1 row per suggestion? or grid?)
+    // Let's do a simple grid or flow.
+    // For now, let's do a bottom bar.
+    let height = (hints.len() as u16 / 4) + 2; // Rough estimate
+    let height = height.clamp(3, 10);
+    
+    let hint_area = Rect {
+        x: area.x,
+        y: area.height.saturating_sub(height),
+        width: area.width,
+        height,
+    };
+    
+    // Clear area to avoid transparency issues
+    frame.render_widget(ratatui::widgets::Clear, hint_area);
+    
+    let block = ratatui::widgets::Block::default()
+        .borders(ratatui::widgets::Borders::TOP)
+        .style(Style::default().bg(colors::BASE));
+        
+    let inner_area = block.inner(hint_area);
+    frame.render_widget(block, hint_area);
+    
+    // Render hints
+    // Format: " k: desc  k: desc "
+    let mut spans = Vec::new();
+    for hint in hints {
+        spans.push(Span::styled(format!(" {} ", hint.key), Style::default().fg(colors::MAUVE).add_modifier(Modifier::BOLD)));
+        spans.push(Span::styled(format!("{}  ", hint.desc), Style::default().fg(colors::TEXT)));
+    }
+    
+    let paragraph = Paragraph::new(Line::from(spans))
+        .wrap(ratatui::widgets::Wrap { trim: true })
+        .style(Style::default().bg(colors::BASE));
+        
+    frame.render_widget(paragraph, inner_area);
 }
 
 // ─── Header ────────────────────────────────────────────────

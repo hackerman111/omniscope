@@ -569,5 +569,8 @@ pub(crate) fn render_popup(frame: &mut Frame, popup: &Popup, area: Rect) {
         Popup::SetStatus { .. } => {
             // Cycle status is handled inline by 's'
         }
+        Popup::EasyMotion(_) => {
+            // Handled directly in ui/panels.rs as an overlay
+        }
     }
 }

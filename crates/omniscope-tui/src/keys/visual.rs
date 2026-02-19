@@ -43,48 +43,57 @@ pub(crate) fn handle_visual_mode(app: &mut App, code: KeyCode, modifiers: KeyMod
             }
         }
 
-        // Navigation
-        KeyCode::Char('j') | KeyCode::Down => {
+        // Navigation through standard motions
+        // We will catch known motion keys and pass them to Motions.
+        KeyCode::Char(c) if "jkhlGg0$".contains(c) => {
             let n = app.count_or_one();
             app.reset_vim_count();
-            app.move_down_n(n);
-            app.update_visual_selection();
+            
+            // h/l change focus, which exits visual mode
+            if c == 'h' {
+                 app.exit_visual_mode();
+                 app.focus_left();
+                 return;
+            } else if c == 'l' {
+                 app.exit_visual_mode();
+                 app.focus_right();
+                 return;
+            }
+            
+            if let Some(target) = super::motions::get_nav_target(app, c, n) {
+                 app.selected_index = target;
+                 app.update_visual_selection();
+            }
         }
-        KeyCode::Char('k') | KeyCode::Up => {
+        KeyCode::Down => {
             let n = app.count_or_one();
             app.reset_vim_count();
-            app.move_up_n(n);
-            app.update_visual_selection();
+            if let Some(target) = super::motions::get_nav_target(app, 'j', n) {
+                 app.selected_index = target;
+                 app.update_visual_selection();
+            }
         }
-        KeyCode::Char('h') | KeyCode::Left  => { 
-            app.reset_vim_count(); 
-            app.exit_visual_mode();
-            app.focus_left();
+        KeyCode::Up => {
+            let n = app.count_or_one();
+            app.reset_vim_count();
+            if let Some(target) = super::motions::get_nav_target(app, 'k', n) {
+                 app.selected_index = target;
+                 app.update_visual_selection();
+            }
         }
-        KeyCode::Char('l') | KeyCode::Right => { 
-            app.reset_vim_count(); 
-            app.exit_visual_mode();
-            app.focus_right(); 
-        }
-
-        KeyCode::Char('G') => {
+        KeyCode::Left => {
              app.reset_vim_count(); 
-             app.move_to_bottom();
-             app.update_visual_selection();
+             app.exit_visual_mode();
+             app.focus_left();
         }
-        KeyCode::Char('g') => { app.pending_key = Some('g'); }
-        KeyCode::Char('0') => {
+        KeyCode::Right => {
              app.reset_vim_count(); 
-             app.move_to_top();
-             app.update_visual_selection();
-        }
-        KeyCode::Char('$') => {
-             app.reset_vim_count();
-             app.move_to_bottom(); // List doesn't have horizontal scroll really
-             app.update_visual_selection();
+             app.exit_visual_mode();
+             app.focus_right(); 
         }
 
         // Half-page scroll
+        // Kept separate as it uses `app.move_down_n` internally, but could be unified if desired.
         KeyCode::Char('d') if modifiers.contains(KeyModifiers::CONTROL) => {
             let n = 10 * app.count_or_one();
             app.reset_vim_count();

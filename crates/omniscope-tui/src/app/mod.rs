@@ -3,8 +3,10 @@ mod navigation;
 mod sidebar;
 mod vim;
 
-use omniscope_core::{AppConfig, BookCard, BookSummaryView, Database, FuzzySearcher};
+use omniscope_core::{AppConfig, BookCard, BookSummaryView, Database, FuzzySearcher, undo::UndoEntry};
 use crate::popup::Popup;
+use crate::keys::operator::Operator;
+use crate::keys::jump_list::JumpList;
 
 /// Vim-like modes for the TUI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -74,6 +76,7 @@ pub enum SortKey {
     UpdatedAsc,
     TitleAsc,
     YearDesc,
+    YearAsc,
     RatingDesc,
     FrecencyDesc,
 }
@@ -84,7 +87,8 @@ impl SortKey {
             Self::UpdatedDesc  => Self::UpdatedAsc,
             Self::UpdatedAsc   => Self::TitleAsc,
             Self::TitleAsc     => Self::YearDesc,
-            Self::YearDesc     => Self::RatingDesc,
+            Self::YearDesc     => Self::YearAsc,
+            Self::YearAsc      => Self::RatingDesc,
             Self::RatingDesc   => Self::FrecencyDesc,
             Self::FrecencyDesc => Self::UpdatedDesc,
         }
@@ -95,18 +99,14 @@ impl SortKey {
             Self::UpdatedAsc   => "updated ▲",
             Self::TitleAsc     => "title A–Z",
             Self::YearDesc     => "year ▼",
+            Self::YearAsc      => "year ▲",
             Self::RatingDesc   => "rating ▼",
             Self::FrecencyDesc => "frecency ▼",
         }
     }
 }
 
-/// An undoable book-modification snapshot.
-#[derive(Debug, Clone)]
-pub struct UndoEntry {
-    pub description: String,
-    pub card: BookCard,
-}
+
 
 /// Items displayed in the sidebar.
 #[derive(Debug, Clone)]
@@ -173,7 +173,10 @@ pub struct App {
     pub vim_count: u32,
 
     /// Pending operator (e.g. `d`, `y`, `c`) waiting for a motion.
-    pub vim_operator: Option<char>,
+    pub pending_operator: Option<Operator>,
+
+    /// Jump list for navigation history.
+    pub jump_list: JumpList,
 
     /// Pending register selection (e.g. `"` waiting for char).
     pub pending_register_select: bool,
@@ -196,6 +199,18 @@ pub struct App {
 
     /// Current sort order for the book list.
     pub sort_key: SortKey,
+
+    // ─── Phase 1: Quickfix ──────────────────────────────────
+
+    /// Quickfix list of books for batch operations.
+    pub quickfix_list: Vec<BookSummaryView>,
+    /// Whether the quickfix panel is currently visible.
+    pub quickfix_show: bool,
+    /// Currently selected index in the quickfix list.
+    pub quickfix_selected: usize,
+
+    /// Last find-char motion (char we looked for, the motion key used f/F/t/T)
+    pub last_find_char: Option<(char, char)>,
 }
 
 impl App {
@@ -248,7 +263,8 @@ impl App {
             config,
             // Phase 1 fields
             vim_count: 0,
-            vim_operator: None,
+            pending_operator: None,
+            jump_list: JumpList::new(),
             pending_register_select: false,
             vim_register: None,
             registers: std::collections::HashMap::new(),
@@ -257,6 +273,10 @@ impl App {
             marks: std::collections::HashMap::new(),
             yank_register: None,
             sort_key: SortKey::default(),
+            quickfix_list: Vec::new(),
+            quickfix_show: false,
+            quickfix_selected: 0,
+            last_find_char: None,
         };
 
         app.refresh_sidebar();

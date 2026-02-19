@@ -17,6 +17,8 @@ pub enum Popup {
     Telescope(TelescopeState),
     /// Help screen.
     Help,
+    /// EasyMotion overlay.
+    EasyMotion(EasyMotionState),
 }
 
 /// Telescope internal mode (vim-like).
@@ -26,6 +28,13 @@ pub enum TelescopeMode {
     Insert,
     /// Navigating results with j/k/gg/G.
     Normal,
+}
+
+/// EasyMotion state matching visible characters to book indices.
+#[derive(Debug, Clone)]
+pub struct EasyMotionState {
+    pub pending: bool,
+    pub targets: Vec<(char, usize)>, // letter -> index in app.books
 }
 
 /// Smart autocomplete state — filters candidates as-you-type,

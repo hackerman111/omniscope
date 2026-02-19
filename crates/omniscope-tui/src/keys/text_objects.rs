@@ -5,7 +5,7 @@ pub enum TextObjectKind {
     Around,
 }
 
-pub fn get_text_object_range(app: &App, object: char, kind: TextObjectKind) -> Option<Vec<usize>> {
+pub fn get_text_object_range(app: &App, object: char, _kind: TextObjectKind) -> Option<Vec<usize>> {
     let current_book = app.selected_book()?;
     
     match object {

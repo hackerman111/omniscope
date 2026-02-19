@@ -1,30 +1,32 @@
 use crossterm::event::{KeyCode, KeyModifiers};
 use crate::app::{App, Mode};
 use super::motions;
-// use super::text_objects; // will use later
+use super::find_char;
+use super::text_objects::{self, TextObjectKind};
+use crate::keys::operator::Operator;
 
 pub(crate) fn handle_pending_mode(app: &mut App, code: KeyCode, _modifiers: KeyModifiers) {
-    let operator = match app.vim_operator {
+    let operator = match app.pending_operator {
         Some(op) => op,
         None => {
-            // Should not happen in Pending mode without operator, 
-            // unless we are in some other pending state?
-            // "g" or "z" pending state is also possible.
-            // But usually we set Mode::Pending only for operators OR we can use it for "g".
-            // App struct has `pending_key`.
-            // Let's assume Mode::Pending is specifically for Operator Pending for now, 
-            // or we unify `pending_key` logic here.
             app.mode = Mode::Normal;
             return;
         }
     };
 
-    // If we have a pending operator 'd', 'y', 'c', '>', '<', '='
-    
-    // 1. Handle double operator (dd, yy, cc, etc.) -> linewise operation on current line
-    if let KeyCode::Char(ch) = code {
-        if ch == operator {
-            // Execute linewise on current line (or count lines)
+    if let KeyCode::Char(c) = code {
+        // 1. Handle Double Operator (e.g. `dd`, `yy`) -> Linewise on current line
+        // We need to map key char to Operator to check if it matches
+        let op_char = match operator {
+            Operator::Delete => 'd',
+            Operator::Yank => 'y',
+            Operator::Change => 'c',
+            Operator::AddTag => '>',
+            Operator::RemoveTag => '<',
+            _ => '\0',
+        };
+
+        if c == op_char {
             let count = app.count_or_one();
             let start = app.selected_index;
             let end = (start + count - 1).min(app.books.len().saturating_sub(1));
@@ -35,92 +37,117 @@ pub(crate) fn handle_pending_mode(app: &mut App, code: KeyCode, _modifiers: KeyM
             app.mode = Mode::Normal;
             return;
         }
-    }
 
-    // 2. Handle motions
-    
-    // Check for pending motion keys (like 'g' waiting for second 'g')
-    if let Some(pmt) = app.pending_key {
-        if pmt == 'g' {
-             app.pending_key = None; // consume it
-             if code == KeyCode::Char('g') {
-                 // matched 'gg'
-                 // execute motion 'g' (which we mapped to top in motions.rs)
-                 let count = app.count_or_one();
-                 if let Some(range) = motions::get_motion_range(app, 'g', count) {
-                     execute_operator(app, operator, range);
-                 }
-                 app.reset_vim_count();
-                 app.mode = Mode::Normal;
-                 return;
-             } else {
-                 // handle other g-commands in pending mode? e.g. 'ge' end of word backward?
-                 // or just ignore/reset if invalid sequence
-                 app.reset_vim_count();
-                 app.mode = Mode::Normal;
-                 return; 
+        // 1.5 Handle Quick Edits for Change ('c')
+        if operator == Operator::Change {
+             match c {
+                  'a' => { // change authors
+                       app.reset_vim_count();
+                       app.mode = Mode::Normal;
+                       // We don't have an isolated authors popup yet, but we can open BookForm 
+                       // or we could add a dedicated popup. For now, open full form.
+                       app.open_add_popup();
+                       app.status_message = "Quick edit: Authors (opening full form)".to_string();
+                       return;
+                  }
+                  't' | 'T' => { // change tags / title
+                       app.reset_vim_count();
+                       app.mode = Mode::Normal;
+                       app.open_edit_tags();
+                       app.status_message = "Quick edit: Tags".to_string();
+                       return;
+                  }
+                  'r' | 'R' => { // change rating
+                       app.reset_vim_count();
+                       app.mode = Mode::Normal;
+                       app.popup = Some(crate::popup::Popup::SetRating {
+                            id: app.selected_book().map(|b| b.id.to_string()).unwrap_or_default(),
+                            current: app.selected_book().and_then(|b| b.rating),
+                       });
+                       return;
+                  }
+                  _ => {}
              }
         }
-        // handle other pending keys if necessary
-    }
-    
-    // Check for text object prefix 'i' or 'a' in pending_key is tricky because they are also normal keys.
-    // But in Pending Mode, 'i' and 'a' usually start a text object.
-    // UNLESS the operator is 'c' and we type 'c' (cc).
-    // OR operator is 'd' and we type 'd' (dd).
-    // If we type 'i', it's likely "inner ...".
-    
-    if let KeyCode::Char(c) = code {
-         // Handle 'g' as start of sequence
-         if c == 'g' {
+
+        // 2. Handle Text Objects (prefix `i` or `a`)
+        // If we are already waiting for a text object target (e.g. we typed `di`)
+        if let Some(pending) = app.pending_key {
+            if pending == 'i' || pending == 'a' {
+                // Completed text object sequence: `diw`, `dap`
+                app.pending_key = None;
+                let kind = if pending == 'i' { TextObjectKind::Inner } else { TextObjectKind::Around };
+                
+                if let Some(range) = text_objects::get_text_object_range(app, c, kind) {
+                    execute_operator(app, operator, range);
+                }
+                app.reset_vim_count();
+                app.mode = Mode::Normal;
+                return;
+            }
+            
+            // If we were waiting for 'g' (e.g. `dg...`)
+            if pending == 'g' {
+                app.pending_key = None;
+                if c == 'g' {
+                    // `dgg` -> delete to top
+                    // This is a motion `gg`.
+                    let count = app.count_or_one();
+                    // `gg` in motions is mapped to `g`
+                    if let Some(range) = motions::get_motion_range(app, 'g', count) {
+                        execute_operator(app, operator, range);
+                    }
+                    app.reset_vim_count();
+                    app.mode = Mode::Normal;
+                    return;
+                }
+                // Handle other g-motions if needed
+            }
+
+            if pending == 'f' || pending == 'F' || pending == 't' || pending == 'T' {
+                app.pending_key = None;
+                let count = app.count_or_one();
+                if let Some(range) = find_char::get_find_char_range(app, pending, c, count) {
+                    execute_operator(app, operator, range);
+                    app.last_find_char = Some((c, pending));
+                }
+                app.reset_vim_count();
+                app.mode = Mode::Normal;
+                return;
+            }
+        }
+        
+        // If no pending key, checking for start of text object or special motion prefix
+        if (c == 'i' || c == 'a' || c == 'f' || c == 'F' || c == 't' || c == 'T') && app.pending_key.is_none() {
+            app.pending_key = Some(c);
+            return;
+        }
+        
+        if c == 'g' && app.pending_key.is_none() {
              app.pending_key = Some('g');
              return;
-         }
-         
-         // Text object prefixes
-         if (c == 'i' || c == 'a') && app.pending_key.is_none() {
-             // We need to store that we are waiting for a text object.
-             // We can use pending_key for this too?
-             // 'i' or 'a'
-             app.pending_key = Some(c);
-             return;
-         }
-         
-         // If we have a pending text object prefix
-         if let Some(prefix) = app.pending_key {
-             if prefix == 'i' || prefix == 'a' {
-                 // matched text object: prefix + c
-                 app.pending_key = None;
-                 // Resolve text object range
-                 let kind = if prefix == 'i' { crate::keys::text_objects::TextObjectKind::Inner } else { crate::keys::text_objects::TextObjectKind::Around };
-                 
-                 if let Some(range) = crate::keys::text_objects::get_text_object_range(app, c, kind) {
-                     execute_operator(app, operator, range);
-                 }
-                 app.reset_vim_count();
-                 app.mode = Mode::Normal;
-                 return;
-             }
-         }
+        }
 
-         if c.is_ascii_digit() && c != '0' {
-             // Multiply existing count? or start new count?
-             // Vim parsing: [count] op [count] motion. Total = count1 * count2.
-             // We already consumed count1 into `app.vim_count` before entering pending.
-             // But wait, `app.reset_vim_count` might have been called?
-             // Actually, usually we store "operator count".
-             
-             // Simplification: just accumulate digit into vim_count.
-             app.push_vim_digit(c.to_digit(10).unwrap());
-             return;
-         }
+        // 3. Handle Digit (accumulate count)
+        if c.is_ascii_digit() && c != '0' {
+            app.push_vim_digit(c.to_digit(10).unwrap());
+            return;
+        }
+        // Note: '0' is treated as start-of-line motion `0` below, unless it's part of a count (which we don't fully disambiguate here perfectly yet, but `push_vim_digit` handles non-zero).
+        // If we want `d10j`, the `1` is handled, then `0`... currently `0` might be interpreted as motion `0` if we aren't careful.
+        // `app.vim_count` > 0 means we are building a number?
+        // standard vim: `0` is digit if count > 0.
+        if c == '0' && app.vim_count > 0 {
+            app.push_vim_digit(0);
+            return;
+        }
     }
-    
-    // Check if it's a motion
+
+    // 4. Handle Motions
+    // Map keys to motion characters
     let count = app.count_or_one();
     let motion_char = match code {
         KeyCode::Char(c) => c,
-        // map other keys like Down -> 'j'
         KeyCode::Down => 'j',
         KeyCode::Up => 'k',
         KeyCode::Esc => {
@@ -128,7 +155,7 @@ pub(crate) fn handle_pending_mode(app: &mut App, code: KeyCode, _modifiers: KeyM
             app.reset_vim_count();
             return;
         }
-        _ => return, // ignore unknown keys or handle better?
+        _ => return, // ignore unknown keys
     };
     
     if let Some(range) = motions::get_motion_range(app, motion_char, count) {
@@ -136,48 +163,31 @@ pub(crate) fn handle_pending_mode(app: &mut App, code: KeyCode, _modifiers: KeyM
         app.reset_vim_count();
         app.mode = Mode::Normal;
     } else {
-        // Maybe it's a text object?
-        // Check for text object (e.g. 'i', 'a' prefix)
-        // Need to handle 'pending_key' for text objects ('i' or 'a') too?
-        // Or handle here directly if it's 'i'/'a'
-        // For now complex text objects (like `diw`) would require more state.
-        // Let's just reset if unknown
-        app.mode = Mode::Normal;
-        app.reset_vim_count();
+        // Unknown motion or invalid key
+        // app.mode = Mode::Normal; 
+        // app.reset_vim_count();
     }
 }
 
-fn execute_operator(app: &mut App, op: char, range: Vec<usize>) {
+fn execute_operator(app: &mut App, op: Operator, range: Vec<usize>) {
     match op {
-        'd' => {
-            // Delete range
-            // We need to handle this in app/vim.rs or here.
-            // Ideally call app.delete_indices(range)
-            app.delete_indices(&range); // Assume this method exists or we add it
+        Operator::Delete => app.delete_indices(&range),
+        Operator::Yank => app.yank_indices(&range),
+        Operator::Change => {
+             // Change: delete + enter insert mode?
+             // For now, just delete and notify.
+             // Ideally: app.delete_indices(&range); app.mode = Mode::Insert;
+             // But "Insert" in this TUI usually means "Popup".
+             // We don't have inline editing yet.
+             app.status_message = format!("Change on {} items (not impl fully)", range.len());
         }
-        'y' => {
-            app.yank_indices(&range);
+        Operator::AddTag => {
+             // Indent/Add tag?
+             app.status_message = "Indent > (not impl)".to_string();
         }
-        'c' => {
-            // Change = delete + insert (or special action)
-            // For now, let's just implement 'delete' part and maybe enter insert?
-            // "change 3 books" -> delete them? No, that's not right.
-            // "change tag" (ct) -> special logic.
-            // If it's a known special combo like `ct`, we might handle it differently.
-            // But here we are executing generic operator on a range.
-            // If range is valid, maybe we open edit for the first one?
-            // Spec: 2cc -> open form for 2 books sequentially.
-            // So we should trigger "edit multiple".
-            // app.edit_indices(range) ?
-            app.status_message = format!("Change on {} items not impl", range.len());
-        }
-        '>' => {
-            // Add tag
-            app.status_message = "Add tag to range".to_string();
-        }
-        '<' => {
-            // Remove tag
-             app.status_message = "Remove tag from range".to_string();
+        Operator::RemoveTag => {
+             // Outdent/Remove tag?
+             app.status_message = "Outdent < (not impl)".to_string();
         }
         _ => {}
     }

@@ -61,6 +61,12 @@ impl App {
                 }
             }
 
+            // Save to undo stack before creating
+            self.push_undo(
+                 format!("Added book: {}", card.metadata.title),
+                 omniscope_core::undo::UndoAction::UpsertCards(vec![card.clone()])
+            );
+
             // Save
             let cards_dir = self.config.cards_dir();
             if let Err(e) = omniscope_core::storage::json_cards::save_card(&cards_dir, &card) {
@@ -96,6 +102,16 @@ impl App {
             let id = id.clone();
             let title = title.clone();
 
+            // Check old state for undo
+            if let Ok(uuid) = uuid::Uuid::parse_str(&id) {
+                if let Ok(old_card) = omniscope_core::storage::json_cards::load_card_by_id(&self.config.cards_dir(), &uuid) {
+                     self.push_undo(
+                          format!("Deleted: {title}"),
+                          omniscope_core::undo::UndoAction::DeleteCards(vec![old_card])
+                     );
+                }
+            }
+
             // Delete from DB
             if let Some(ref db) = self.db {
                 let _ = db.delete_book(&id);
@@ -120,6 +136,11 @@ impl App {
 
             // Load full card, update, save
             if let Ok(mut card) = omniscope_core::storage::json_cards::load_card_by_id(&cards_dir, &id) {
+                self.push_undo(
+                     format!("Set rating for: {}", card.metadata.title),
+                     omniscope_core::undo::UndoAction::UpsertCards(vec![card.clone()])
+                );
+                
                 card.organization.rating = Some(rating);
                 card.updated_at = chrono::Utc::now();
                 let _ = omniscope_core::storage::json_cards::save_card(&cards_dir, &card);
@@ -145,6 +166,11 @@ impl App {
 
             let cards_dir = self.config.cards_dir();
             if let Ok(mut card) = omniscope_core::storage::json_cards::load_card_by_id(&cards_dir, &id) {
+                self.push_undo(
+                     format!("Cycled status for: {}", card.metadata.title),
+                     omniscope_core::undo::UndoAction::UpsertCards(vec![card.clone()])
+                );
+                
                 card.organization.read_status = new_status;
                 card.updated_at = chrono::Utc::now();
                 let _ = omniscope_core::storage::json_cards::save_card(&cards_dir, &card);
@@ -176,6 +202,11 @@ impl App {
             let cards_dir = self.config.cards_dir();
             if let Ok(uuid) = uuid::Uuid::parse_str(&id) {
                 if let Ok(mut card) = omniscope_core::storage::json_cards::load_card_by_id(&cards_dir, &uuid) {
+                    self.push_undo(
+                         format!("Edited tags for: {}", card.metadata.title),
+                         omniscope_core::undo::UndoAction::UpsertCards(vec![card.clone()])
+                    );
+                    
                     card.organization.tags = tags.clone();
                     card.updated_at = chrono::Utc::now();
                     let _ = omniscope_core::storage::json_cards::save_card(&cards_dir, &card);

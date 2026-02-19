@@ -7,6 +7,7 @@ pub mod search;
 pub mod search_dsl;
 pub mod storage;
 pub mod viewer;
+pub mod undo;
 
 pub use config::AppConfig;
 pub use error::{OmniscopeError, Result};
