@@ -206,25 +206,164 @@ fn handle_search_mode(app: &mut App, code: KeyCode) {
     }
 }
 
-fn handle_popup_key(app: &mut App, code: KeyCode, _modifiers: KeyModifiers) {
+fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
 
 
     match &mut app.popup {
-        Some(Popup::AddBook(form)) => match code {
-            KeyCode::Esc => {
-                app.popup = None;
+        Some(Popup::AddBook(form)) => {
+            // Check if we are editing the "File path" field (index 5)
+            let is_path_field = form.active_field == 5;
+            
+            match code {
+                KeyCode::Esc => {
+                    // If autocomplete is active, close it first
+                    if form.autocomplete.active {
+                        form.autocomplete.clear();
+                    } else {
+                        app.popup = None;
+                    }
+                }
+                KeyCode::Enter => {
+                    if form.autocomplete.active {
+                        if let Some(selection) = form.autocomplete.current().map(|s| s.to_string()) {
+                            // Apply selection
+                            // If selection ends with /, it's a directory -> keep it open for more typing
+                            // If it's a file, we might be done
+                            
+                            // We need to resolve the full path based on what was typed
+                            // The autocomplete logic below (update_filepath_suggestions) handles the resolution
+                            // Here we just want to replace the current input with the selection
+                            
+                            // Reconstruction logic:
+                            // We need to know the directory context of the selection. 
+                            // Easier approach: the selection in dropdown should probably be the FULL path or relative path 
+                            // that we can just drop in.
+                            // In our previous logic, we listed filenames.
+                            // Let's adapt `update_filepath_suggestions` to store full valid paths in candidates?
+                            // OR, we recompose it here.
+                            
+                            let field = &mut form.fields[5];
+                            let current = &field.value;
+                            
+                            // Resolve header directory
+                            let expanded = if current.starts_with("~/") {
+                                if let Some(home) = dirs::home_dir() {
+                                    current.replacen("~", &home.to_string_lossy(), 1)
+                                } else {
+                                    current.clone()
+                                }
+                            } else {
+                                current.clone()
+                            };
+                            
+                            let path = std::path::Path::new(&expanded);
+                            let dir = if expanded.ends_with('/') {
+                                path.to_path_buf()
+                            } else {
+                                path.parent().unwrap_or(std::path::Path::new(".")).to_path_buf()
+                            };
+                            
+                            let new_full_path = dir.join(&selection).to_string_lossy().to_string();
+                            
+                            // Restore ~ if needed
+                            let final_val = if current.starts_with("~/") {
+                                if let Some(home) = dirs::home_dir() {
+                                    let h = home.to_string_lossy();
+                                    if new_full_path.starts_with(h.as_ref()) {
+                                        new_full_path.replacen(h.as_ref(), "~", 1)
+                                    } else {
+                                        new_full_path
+                                    }
+                                } else {
+                                    new_full_path
+                                }
+                            } else {
+                                new_full_path
+                            };
+                            
+                            field.value = final_val;
+                            
+                            // Check if dir to append /
+                            // We need to expand again to check metadata safely
+                            let check_path = if field.value.starts_with("~/") {
+                                 if let Some(home) = dirs::home_dir() {
+                                     field.value.replacen("~", &home.to_string_lossy(), 1)
+                                 } else {
+                                     field.value.clone()
+                                 }
+                            } else {
+                                field.value.clone()
+                            };
+                            
+                            if let Ok(m) = std::fs::metadata(check_path) {
+                                if m.is_dir() && !field.value.ends_with('/') {
+                                    field.value.push('/');
+                                }
+                            }
+                            
+                            field.cursor = field.value.len();
+                            
+                            // If it's a directory, trigger suggestions again for the new dir
+                            if field.value.ends_with('/') {
+                                update_filepath_suggestions(form);
+                            } else {
+                                form.autocomplete.clear();
+                            }
+                        } else {
+                             form.autocomplete.clear();
+                        }
+                    } else {
+                        app.submit_add_book();
+                    }
+                }
+                KeyCode::Tab => {
+                    if form.autocomplete.active {
+                        // Cycle selection
+                        form.autocomplete.tab_next();
+                    } else if is_path_field {
+                         // Trigger autocomplete manually
+                         update_filepath_suggestions(form);
+                         if !form.autocomplete.active {
+                             form.next_field();
+                         }
+                    } else {
+                        form.next_field();
+                    }
+                }
+                KeyCode::BackTab => {
+                    if form.autocomplete.active {
+                        form.autocomplete.move_up();
+                    } else {
+                        form.prev_field();
+                    }
+                }
+                KeyCode::Up => {
+                    if form.autocomplete.active {
+                        form.autocomplete.move_up();
+                    }
+                }
+                KeyCode::Down => {
+                    if form.autocomplete.active {
+                        form.autocomplete.move_down();
+                    }
+                }
+                KeyCode::Backspace => {
+                    form.active_field_mut().delete_back();
+                    if is_path_field {
+                        update_filepath_suggestions(form);
+                    }
+                }
+                KeyCode::Left => form.active_field_mut().move_left(),
+                KeyCode::Right => form.active_field_mut().move_right(),
+                KeyCode::Char(c) => {
+                    form.active_field_mut().insert_char(c);
+                    if is_path_field {
+                        update_filepath_suggestions(form);
+                    }
+                }
+                _ => {}
             }
-            KeyCode::Enter => {
-                app.submit_add_book();
-            }
-            KeyCode::Tab => form.next_field(),
-            KeyCode::BackTab => form.prev_field(),
-            KeyCode::Backspace => form.active_field_mut().delete_back(),
-            KeyCode::Left => form.active_field_mut().move_left(),
-            KeyCode::Right => form.active_field_mut().move_right(),
-            KeyCode::Char(c) => form.active_field_mut().insert_char(c),
-            _ => {}
-        },
+        }
 
         Some(Popup::DeleteConfirm { .. }) => match code {
             KeyCode::Char('y') | KeyCode::Char('Y') => {
@@ -507,5 +646,68 @@ fn execute_command(app: &mut App, cmd: &str) {
         _ => {
             app.status_message = format!("Unknown command: {cmd}");
         }
+    }
+}
+
+fn update_filepath_suggestions(form: &mut crate::popup::AddBookForm) {
+    let field = &form.fields[5];
+    let raw_val = &field.value;
+    
+    // 1. Expand `~`
+    let expanded_val = if raw_val.starts_with("~/") {
+        if let Some(home) = dirs::home_dir() {
+             raw_val.replacen("~", &home.to_string_lossy(), 1)
+        } else {
+            raw_val.clone()
+        }
+    } else {
+        raw_val.clone()
+    };
+
+    // 2. Identify dir + prefix
+    // If it ends with /, show contents of that dir.
+    // Otherwise, show contents of parent matching prefix.
+    let (search_dir, prefix) = if expanded_val.ends_with('/') {
+        (std::path::PathBuf::from(&expanded_val), "".to_string())
+    } else {
+        let p = std::path::Path::new(&expanded_val);
+        // If path has no parent (e.g. just "foo"), parent is "."
+        let parent = if let Some(p) = p.parent() {
+            if p.as_os_str().is_empty() {
+                std::path::PathBuf::from(".")
+            } else {
+                p.to_path_buf()
+            }
+        } else {
+            std::path::PathBuf::from(".")
+        };
+        let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
+        (parent, name.to_string())
+    };
+
+    // 3. Read dir
+    if let Ok(entries) = std::fs::read_dir(&search_dir) {
+        let mut matches: Vec<String> = entries
+            .filter_map(|e| e.ok())
+            .map(|e| {
+                let name = e.file_name().to_string_lossy().to_string();
+                if e.path().is_dir() {
+                    name + "/"
+                } else {
+                    name
+                }
+            })
+            .filter(|name| name.starts_with(&prefix))
+            .collect();
+
+        // Sort for stability
+        matches.sort();
+        
+        form.autocomplete.all_candidates = matches.clone();
+        form.autocomplete.visible = matches;
+        form.autocomplete.active = !form.autocomplete.visible.is_empty();
+        form.autocomplete.selected = if form.autocomplete.active { Some(0) } else { None };
+    } else {
+        form.autocomplete.clear();
     }
 }

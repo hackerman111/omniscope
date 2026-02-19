@@ -292,7 +292,6 @@ impl TelescopeState {
         // Add trailing space so user can type next token
         if !self.query[self.cursor..].starts_with(' ') {
             self.query.insert(self.cursor, ' ');
-            self.cursor += 1;
         }
         self.autocomplete.clear();
     }
@@ -303,6 +302,7 @@ impl TelescopeState {
 pub struct AddBookForm {
     pub fields: Vec<FormField>,
     pub active_field: usize,
+    pub autocomplete: AutocompleteState,
 }
 
 /// Form for editing tags.
@@ -391,6 +391,7 @@ impl AddBookForm {
                 FormField::new("File path"),
             ],
             active_field: 0,
+            autocomplete: AutocompleteState::new(),
         }
     }
 

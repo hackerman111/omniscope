@@ -568,7 +568,7 @@ impl App {
 
     /// Open the Telescope search overlay and preload all autocomplete candidates.
     pub fn open_telescope(&mut self) {
-        use crate::popup::{TelescopeState, AutocompleteState};
+        use crate::popup::TelescopeState;
         let mut state = TelescopeState::new();
         state.results = self.all_books.clone();
         self.popup = Some(Popup::Telescope(state));
@@ -580,8 +580,8 @@ impl App {
     pub fn telescope_reload_candidates(&mut self, token: &str) {
         let mut candidates: Vec<String> = Vec::new();
 
-        // Add DSL keyword hints if token is empty
-        if token.is_empty() || token == "@" || token == "#" {
+        // Always add DSL keywords if token is empty or very short
+        if token.len() <= 1 {
             candidates.push("@author:".to_string());
             candidates.push("#".to_string());
             candidates.push("y:".to_string());
@@ -596,9 +596,9 @@ impl App {
             candidates.push("NOT".to_string());
         }
 
-        // Authors (@author: prefix)
-        if token.is_empty() || token.starts_with('@') {
-            let prefix = token.strip_prefix("@author:").or_else(|| token.strip_prefix('@')).unwrap_or("");
+        // Authors: match on @author: OR just @ OR if token matches an author name
+        if token.is_empty() || token.starts_with('@') || token.len() > 1 {
+            let prefix = token.strip_prefix("@author:").or_else(|| token.strip_prefix('@')).unwrap_or(token);
             if let Some(ref db) = self.db {
                 if let Ok(authors) = db.get_all_authors() {
                     for a in authors {
@@ -610,9 +610,9 @@ impl App {
             }
         }
 
-        // Tags (#tag prefix)
-        if token.is_empty() || token.starts_with('#') {
-            let prefix = token.strip_prefix('#').unwrap_or("");
+        // Tags: match on # OR if token matches a tag name
+        if token.is_empty() || token.starts_with('#') || token.len() > 1 {
+            let prefix = token.strip_prefix('#').unwrap_or(token);
             if let Some(ref db) = self.db {
                 if let Ok(tags) = db.list_tags() {
                     for (name, _count) in tags {

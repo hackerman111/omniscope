@@ -494,6 +494,41 @@ fn render_popup(frame: &mut Frame, popup: &Popup, area: Rect) {
             )));
 
             frame.render_widget(Paragraph::new(lines), inner);
+
+            // ── Autocomplete Dropdown ──
+            if form.autocomplete.active && !form.autocomplete.visible.is_empty() {
+                // Determine position
+                // "File path" is index 5, so Line 5 relative to inner.
+                // We want to draw it below the input line.
+                // "  File path: " is approx 13 chars wide.
+                let x = inner.x + 13;
+                let y = inner.y + 6;
+                let width = (inner.width as u16).saturating_sub(15).max(20);
+                let height = form.autocomplete.visible.len().min(5) as u16 + 2; // +2 for borders
+
+                let sug_area = Rect { x, y, width, height };
+                frame.render_widget(Clear, sug_area);
+
+                let items: Vec<ListItem> = form.autocomplete.visible.iter()
+                    .enumerate()
+                    .map(|(i, s)| {
+                        let is_sel = form.autocomplete.selected == Some(i);
+                        let style = if is_sel {
+                            Style::default().bg(colors::GREEN).fg(colors::BASE).add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(colors::TEXT)
+                        };
+                        ListItem::new(Span::styled(format!(" {s} "), style))
+                    })
+                    .collect();
+
+                let block = Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(colors::GREEN))
+                    .style(Style::default().bg(colors::SURFACE0));
+                
+                frame.render_widget(List::new(items).block(block), sug_area);
+            }
         }
 
         Popup::DeleteConfirm { title, .. } => {
@@ -615,14 +650,29 @@ fn render_popup(frame: &mut Frame, popup: &Popup, area: Rect) {
         }
 
         Popup::Telescope(state) => {
+            use crate::popup::TelescopeMode;
+            
             // Near full-screen overlay (90% × 85%)
             let popup_area = centered_rect(90, 85, area);
             frame.render_widget(Clear, popup_area);
 
+            let mode_str = match state.mode {
+                TelescopeMode::Insert => " INSERT ",
+                TelescopeMode::Normal => " NORMAL ",
+            };
+
+            let mode_style = match state.mode {
+                TelescopeMode::Insert => Style::default().bg(colors::GREEN).fg(colors::BASE).add_modifier(Modifier::BOLD),
+                TelescopeMode::Normal => Style::default().bg(colors::BLUE).fg(colors::BASE).add_modifier(Modifier::BOLD),
+            };
+
             let block = Block::default()
-                .title(" 🔭 SEARCH ")
+                .title(Line::from(vec![
+                    Span::styled(" 🔭 SEARCH ", Style::default().fg(colors::LAVENDER)),
+                    Span::styled(mode_str, mode_style),
+                ]))
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(colors::LAVENDER))
+                .border_style(Style::default().fg(if state.mode == TelescopeMode::Insert { colors::GREEN } else { colors::BLUE }))
                 .style(Style::default().bg(colors::BASE));
 
             let inner = block.inner(popup_area);
@@ -640,12 +690,37 @@ fn render_popup(frame: &mut Frame, popup: &Popup, area: Rect) {
                 .split(inner);
 
             // ── Search input ──
-            let search_line = Line::from(vec![
+            let cursor_style = if state.mode == TelescopeMode::Insert {
+                Style::default().fg(colors::TEXT).add_modifier(Modifier::SLOW_BLINK)
+            } else {
+                Style::default().fg(colors::TEXT)
+            };
+            
+            let mut query_spans = vec![
                 Span::styled("  > ", Style::default().fg(colors::LAVENDER).add_modifier(Modifier::BOLD)),
-                Span::styled(&state.query, Style::default().fg(colors::TEXT)),
-                Span::styled("█", Style::default().fg(colors::TEXT).add_modifier(Modifier::SLOW_BLINK)),
-            ]);
-            frame.render_widget(Paragraph::new(search_line), telescope_layout[0]);
+            ];
+            
+            // Split query at cursor to insert cursor block
+            if state.cursor >= state.query.len() {
+                query_spans.push(Span::styled(&state.query, Style::default().fg(colors::TEXT)));
+                if state.mode == TelescopeMode::Insert {
+                    query_spans.push(Span::styled("█", cursor_style));
+                }
+            } else {
+                let before = &state.query[..state.cursor];
+                let cursor_char = state.query[state.cursor..].chars().next().unwrap().to_string();
+                let after = &state.query[state.cursor + cursor_char.len()..];
+                
+                query_spans.push(Span::styled(before, Style::default().fg(colors::TEXT)));
+                if state.mode == TelescopeMode::Insert {
+                    query_spans.push(Span::styled(cursor_char.clone(), cursor_style.bg(colors::SURFACE1)));
+                } else {
+                    query_spans.push(Span::styled(cursor_char, Style::default().fg(colors::TEXT)));
+                }
+                query_spans.push(Span::styled(after, Style::default().fg(colors::TEXT)));
+            }
+
+            frame.render_widget(Paragraph::new(Line::from(query_spans)), telescope_layout[0]);
 
             // ── Filter chips ──
             let mut chips: Vec<Span> = vec![Span::raw("  ")];
@@ -678,11 +753,8 @@ fn render_popup(frame: &mut Frame, popup: &Popup, area: Rect) {
             let results_area = results_preview[0];
             let result_count = state.results.len();
             let visible_h = results_area.height as usize;
-            let scroll_off = if state.selected >= visible_h {
-                state.selected - visible_h + 1
-            } else {
-                0
-            };
+            // Use state.scroll that we added to TelescopeState
+            let scroll_off = state.scroll;
 
             let result_items: Vec<ListItem> = state.results.iter()
                 .enumerate()
@@ -807,36 +879,60 @@ fn render_popup(frame: &mut Frame, popup: &Popup, area: Rect) {
             frame.render_widget(Paragraph::new(preview_content), preview_area);
 
             // ── Autocomplete suggestions (overlay) ──
-            if state.show_suggestions && !state.suggestions.is_empty() {
-                let sug_height = state.suggestions.len().min(5) as u16;
+            if state.autocomplete.active && !state.autocomplete.visible.is_empty() {
+                // Determine X position based on cursor logic (approximate)
+                // We'll place it slightly offset from the start for now
+                let sug_height = state.autocomplete.visible.len().min(8) as u16 + 2; // +2 for borders
                 let sug_area = Rect {
                     x: telescope_layout[0].x + 4,
                     y: telescope_layout[0].y + 1,
-                    width: 40.min(inner.width),
+                    width: 45.min(inner.width),
                     height: sug_height,
                 };
                 frame.render_widget(Clear, sug_area);
 
-                let sug_items: Vec<ListItem> = state.suggestions.iter()
-                    .map(|s| ListItem::new(Span::styled(format!("  {s}"), Style::default().fg(colors::PEACH))))
+                let sug_items: Vec<ListItem> = state.autocomplete.visible.iter()
+                    .enumerate()
+                    .map(|(i, s)| {
+                        let is_sel = state.autocomplete.selected == Some(i);
+                        let style = if is_sel {
+                            Style::default().bg(colors::GREEN).fg(colors::BASE).add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(colors::TEXT)
+                        };
+                        ListItem::new(Span::styled(format!("  {s}"), style))
+                    })
                     .collect();
 
                 let sug_block = Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(colors::GREEN))
                     .style(Style::default().bg(colors::SURFACE0));
+                
                 frame.render_widget(List::new(sug_items).block(sug_block), sug_area);
             }
 
             // ── Footer ──
-            let footer = Line::from(vec![
-                Span::styled("  Enter", Style::default().fg(colors::LAVENDER)),
-                Span::styled(": select  ", Style::default().fg(colors::SUBTEXT0).add_modifier(Modifier::DIM)),
-                Span::styled("↑↓", Style::default().fg(colors::LAVENDER)),
-                Span::styled(": navigate  ", Style::default().fg(colors::SUBTEXT0).add_modifier(Modifier::DIM)),
-                Span::styled("Tab", Style::default().fg(colors::LAVENDER)),
-                Span::styled(": complete  ", Style::default().fg(colors::SUBTEXT0).add_modifier(Modifier::DIM)),
-                Span::styled("Esc", Style::default().fg(colors::LAVENDER)),
-                Span::styled(": close", Style::default().fg(colors::SUBTEXT0).add_modifier(Modifier::DIM)),
-            ]);
+            let footer = match state.mode {
+                TelescopeMode::Insert => Line::from(vec![
+                    Span::styled("  Esc", Style::default().fg(colors::LAVENDER)),
+                    Span::styled(": normal  ", Style::default().fg(colors::SUBTEXT0).add_modifier(Modifier::DIM)),
+                    Span::styled("Tab", Style::default().fg(colors::LAVENDER)),
+                    Span::styled(": next  ", Style::default().fg(colors::SUBTEXT0).add_modifier(Modifier::DIM)),
+                    Span::styled("Enter", Style::default().fg(colors::LAVENDER)),
+                    Span::styled(": select  ", Style::default().fg(colors::SUBTEXT0).add_modifier(Modifier::DIM)),
+                ]),
+                TelescopeMode::Normal => Line::from(vec![
+                    Span::styled("  i", Style::default().fg(colors::LAVENDER)),
+                    Span::styled(": insert  ", Style::default().fg(colors::SUBTEXT0).add_modifier(Modifier::DIM)),
+                    Span::styled("j/k", Style::default().fg(colors::LAVENDER)),
+                    Span::styled(": navigate  ", Style::default().fg(colors::SUBTEXT0).add_modifier(Modifier::DIM)),
+                    Span::styled("Enter", Style::default().fg(colors::LAVENDER)),
+                    Span::styled(": open  ", Style::default().fg(colors::SUBTEXT0).add_modifier(Modifier::DIM)),
+                    Span::styled("q/Esc", Style::default().fg(colors::LAVENDER)),
+                    Span::styled(": close", Style::default().fg(colors::SUBTEXT0).add_modifier(Modifier::DIM)),
+                ]),
+            };
             frame.render_widget(Paragraph::new(footer), telescope_layout[3]);
         }
 

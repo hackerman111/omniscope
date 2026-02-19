@@ -682,6 +682,7 @@ dependencies = [
  "anyhow",
  "chrono",
  "crossterm",
+ "dirs",
  "omniscope-core",
  "ratatui",
  "tokio",
