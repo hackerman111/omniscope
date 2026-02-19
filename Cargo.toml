@@ -4,6 +4,10 @@ members = [
     "crates/omniscope-core",
     "crates/omniscope-tui",
     "crates/omniscope-cli",
+    "crates/omniscope-ai",
+    "crates/omniscope-science",
+    "crates/omniscope-server",
+    "crates/omniscope-ffi",
 ]
 
 [workspace.package]

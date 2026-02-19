@@ -30,11 +30,17 @@ impl Database {
 
     /// Create all tables if they don't exist.
     fn init_schema(&self) -> Result<()> {
+        // Base tables + WAL mode
         self.conn.execute_batch(
             "
             PRAGMA journal_mode = WAL;
             PRAGMA synchronous = NORMAL;
             PRAGMA foreign_keys = ON;
+
+            CREATE TABLE IF NOT EXISTS schema_migrations (
+                version    INTEGER PRIMARY KEY,
+                applied_at TEXT NOT NULL
+            );
 
             CREATE TABLE IF NOT EXISTS books (
                 id          TEXT PRIMARY KEY,
@@ -42,6 +48,8 @@ impl Database {
                 authors     TEXT DEFAULT '[]',
                 year        INTEGER,
                 isbn        TEXT,
+                doi         TEXT,
+                arxiv_id    TEXT,
                 file_path   TEXT,
                 file_format TEXT,
                 tags        TEXT DEFAULT '[]',
@@ -70,6 +78,32 @@ impl Database {
                 icon        TEXT,
                 color       TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS folders (
+                id          TEXT PRIMARY KEY,
+                name        TEXT NOT NULL,
+                parent_id   TEXT,
+                library_id  TEXT,
+                FOREIGN KEY (parent_id) REFERENCES folders(id) ON DELETE SET NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS action_log (
+                id              TEXT PRIMARY KEY,
+                action_type     TEXT NOT NULL,
+                payload         TEXT NOT NULL,
+                snapshot_before TEXT,
+                created_at      TEXT NOT NULL,
+                reversed        INTEGER NOT NULL DEFAULT 0
+            );
+            ",
+        )?;
+
+        // Indexes on columns that always exist
+        self.conn.execute_batch(
+            "
+            CREATE INDEX IF NOT EXISTS idx_books_read_status ON books(read_status);
+            CREATE INDEX IF NOT EXISTS idx_books_year        ON books(year);
+            CREATE INDEX IF NOT EXISTS idx_books_rating      ON books(rating);
             ",
         )?;
 
@@ -91,8 +125,38 @@ impl Database {
             )?;
         }
 
+        // Record that schema version 1 has been applied
+        self.conn.execute(
+            "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (1, ?1)",
+            rusqlite::params![chrono::Utc::now().to_rfc3339()],
+        )?;
+
+        // ── Migration v2: add doi / arxiv_id columns if they are missing ──
+        // These columns were added after the initial schema; existing databases
+        // need an ALTER TABLE to pick them up.
+        let has_doi: bool = self
+            .conn
+            .prepare("SELECT 1 FROM pragma_table_info('books') WHERE name='doi'")?
+            .exists([])?;
+        if !has_doi {
+            self.conn.execute_batch(
+                "ALTER TABLE books ADD COLUMN doi TEXT;
+                 ALTER TABLE books ADD COLUMN arxiv_id TEXT;",
+            )?;
+            // Create the new indexes now that the columns exist
+            self.conn.execute_batch(
+                "CREATE INDEX IF NOT EXISTS idx_books_doi      ON books(doi);
+                 CREATE INDEX IF NOT EXISTS idx_books_arxiv_id ON books(arxiv_id);",
+            )?;
+            self.conn.execute(
+                "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (2, ?1)",
+                rusqlite::params![chrono::Utc::now().to_rfc3339()],
+            )?;
+        }
+
         Ok(())
     }
+
 
     // ─── Book CRUD ──────────────────────────────────────────
 
@@ -105,18 +169,24 @@ impl Database {
         let folders_json = serde_json::to_string(&card.organization.folders)?;
         let key_topics_json = serde_json::to_string(&card.ai.key_topics)?;
 
+        // Extract doi / arxiv_id from identifiers if present
+        let doi = card.identifiers.as_ref().and_then(|i| i.doi.as_deref());
+        let arxiv_id = card.identifiers.as_ref().and_then(|i| i.arxiv_id.as_deref());
+
         self.conn.execute(
             "INSERT OR REPLACE INTO books
-                (id, title, authors, year, isbn, file_path, file_format,
+                (id, title, authors, year, isbn, doi, arxiv_id, file_path, file_format,
                  tags, libraries, folders, read_status, rating, summary,
                  key_topics, updated_at, frecency_score)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
             params![
                 card.id.to_string(),
                 card.metadata.title,
                 authors_json,
                 card.metadata.year,
                 isbn,
+                doi,
+                arxiv_id,
                 card.file.as_ref().map(|f| &f.path),
                 card.file.as_ref().map(|f| f.format.to_string()),
                 tags_json,
@@ -444,6 +514,73 @@ impl Database {
         result.sort();
         Ok(result)
     }
+
+    // ─── Folder CRUD ────────────────────────────────────────
+
+    /// Create a new folder. Returns the new folder's ID.
+    pub fn create_folder(
+        &self,
+        name: &str,
+        parent_id: Option<&str>,
+        library_id: Option<&str>,
+    ) -> Result<String> {
+        let id = uuid::Uuid::now_v7().to_string();
+        self.conn.execute(
+            "INSERT INTO folders (id, name, parent_id, library_id) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![id, name, parent_id, library_id],
+        )?;
+        Ok(id)
+    }
+
+    /// List folders, optionally filtering by parent folder.
+    /// Pass `None` to list top-level folders.
+    pub fn list_folders(&self, parent_id: Option<&str>) -> Result<Vec<Folder>> {
+        let (sql, params_vec): (&str, Vec<Box<dyn rusqlite::ToSql>>) = match parent_id {
+            Some(pid) => (
+                "SELECT id, name, parent_id, library_id FROM folders WHERE parent_id = ?1 ORDER BY name",
+                vec![Box::new(pid.to_owned())],
+            ),
+            None => (
+                "SELECT id, name, parent_id, library_id FROM folders WHERE parent_id IS NULL ORDER BY name",
+                vec![],
+            ),
+        };
+
+        let mut stmt = self.conn.prepare(sql)?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(params_vec.iter().map(|p| p.as_ref())), |row| {
+            Ok(Folder {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                parent_id: row.get(2)?,
+                library_id: row.get(3)?,
+            })
+        })?;
+        rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// Delete a folder by ID. Books in the folder are NOT deleted.
+    pub fn delete_folder(&self, id: &str) -> Result<()> {
+        self.conn.execute("DELETE FROM folders WHERE id = ?1", rusqlite::params![id])?;
+        Ok(())
+    }
+
+    /// Rename a folder.
+    pub fn rename_folder(&self, id: &str, new_name: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE folders SET name = ?1 WHERE id = ?2",
+            rusqlite::params![new_name, id],
+        )?;
+        Ok(())
+    }
+}
+
+/// A folder in the library hierarchy.
+#[derive(Debug, Clone)]
+pub struct Folder {
+    pub id: String,
+    pub name: String,
+    pub parent_id: Option<String>,
+    pub library_id: Option<String>,
 }
 
 #[cfg(test)]
@@ -543,5 +680,57 @@ mod tests {
         let summary = db.get_book_summary(&id).unwrap();
         assert_eq!(summary.title, "Updated Title");
         assert_eq!(db.count_books().unwrap(), 1);
+    }
+
+    #[test]
+    fn test_upsert_with_identifiers() {
+        let db = Database::open_in_memory().unwrap();
+        let mut card = make_test_card("Attention Is All You Need");
+        card.identifiers = Some(crate::models::ScientificIdentifiers {
+            doi: Some("10.5555/3295222.3295349".to_string()),
+            arxiv_id: Some("1706.03762".to_string()),
+            ..Default::default()
+        });
+        db.upsert_book(&card).unwrap();
+
+        let id = card.id.to_string();
+        let summary = db.get_book_summary(&id).unwrap();
+        assert_eq!(summary.title, "Attention Is All You Need");
+    }
+
+    #[test]
+    fn test_folder_crud() {
+        let db = Database::open_in_memory().unwrap();
+
+        // Create a top-level folder
+        let folder_id = db.create_folder("Papers", None, None).unwrap();
+        assert!(!folder_id.is_empty());
+
+        let folders = db.list_folders(None).unwrap();
+        assert_eq!(folders.len(), 1);
+        assert_eq!(folders[0].name, "Papers");
+
+        // Rename it
+        db.rename_folder(&folder_id, "Research Papers").unwrap();
+        let folders = db.list_folders(None).unwrap();
+        assert_eq!(folders[0].name, "Research Papers");
+
+        // Create a child folder
+        let sub_id = db.create_folder("AI", Some(&folder_id), None).unwrap();
+        let sub_folders = db.list_folders(Some(&folder_id)).unwrap();
+        assert_eq!(sub_folders.len(), 1);
+        assert_eq!(sub_folders[0].id, sub_id);
+
+        // Delete the parent; ON DELETE SET NULL — child becomes top-level
+        db.delete_folder(&folder_id).unwrap();
+        let top_level = db.list_folders(None).unwrap();
+        // Child now surfaces as top-level (parent_id = NULL)
+        assert_eq!(top_level.len(), 1);
+        assert_eq!(top_level[0].id, sub_id);
+
+        // Delete the child too
+        db.delete_folder(&sub_id).unwrap();
+        let empty = db.list_folders(None).unwrap();
+        assert!(empty.is_empty());
     }
 }

@@ -21,6 +21,15 @@ use popup::Popup;
 
 /// Run the full TUI application.
 pub fn run_tui(app: &mut App) -> Result<()> {
+    // Install panic hook: if a panic occurs, restore the terminal before
+    // printing the panic message, so the user can read it in their shell.
+    let original_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let _ = crossterm::terminal::disable_raw_mode();
+        let _ = std::io::stdout().execute(crossterm::terminal::LeaveAlternateScreen);
+        original_hook(info);
+    }));
+
     // Setup terminal
     enable_raw_mode()?;
     io::stdout().execute(EnterAlternateScreen)?;
@@ -74,81 +83,173 @@ fn handle_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
 }
 
 fn handle_normal_mode(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
-    // Handle pending key sequences (e.g. gg)
-    if let Some(pending) = app.pending_key.take() {
-        match (pending, code) {
-            ('g', KeyCode::Char('g')) => {
-                app.move_to_top();
-                return;
-            }
-            _ => {} // discard unknown sequence
+    // ── Digit accumulation (vim count prefix) ─────────────────────────
+    if let KeyCode::Char(c) = code {
+        if c.is_ascii_digit() && c != '0' {
+            // '0' alone means "go to beginning of line", not a digit prefix
+            app.push_vim_digit(c.to_digit(10).unwrap());
+            return;
         }
     }
 
+    // ── Handle pending key sequences ──────────────────────────────────
+    if let Some(pending) = app.pending_key.take() {
+        let count = app.count_or_one();
+        app.reset_vim_count();
+
+        match (pending, code) {
+            // gg — go to top
+            ('g', KeyCode::Char('g')) => { app.move_to_top(); return; }
+            // gt — quick-edit title (open add-book form with this book's title pre-filled)
+            ('g', KeyCode::Char('t')) => {
+                if let Some(book) = app.selected_book() {
+                    let title = book.title.clone();
+                    app.open_add_popup();
+                    if let Some(crate::popup::Popup::AddBook(ref mut form)) = app.popup {
+                        form.fields[0].value = title;
+                        form.fields[0].cursor = form.fields[0].value.len();
+                    }
+                }
+                return;
+            }
+            // gr — set rating (alias for R)
+            ('g', KeyCode::Char('r')) => {
+                app.popup = Some(crate::popup::Popup::SetRating {
+                    id: app.selected_book().map(|b| b.id.to_string()).unwrap_or_default(),
+                    current: app.selected_book().and_then(|b| b.rating),
+                });
+                return;
+            }
+            // gs — cycle status (alias for s)
+            ('g', KeyCode::Char('s')) => { app.cycle_status(); return; }
+            // zz — center (just status bar feedback)
+            ('z', KeyCode::Char('z')) => {
+                app.status_message = format!("Line {}", app.selected_index + 1);
+                return;
+            }
+            // m<char> — set mark
+            ('m', KeyCode::Char(c)) if c.is_ascii_alphabetic() => {
+                app.set_mark(c);
+                return;
+            }
+            // '<char> — jump to mark
+            ('\'', KeyCode::Char(c)) if c.is_ascii_alphabetic() => {
+                app.jump_to_mark(c);
+                return;
+            }
+            // d<motion> — operator pending: delete
+            ('d', KeyCode::Char('d')) => {
+                // dd = delete current book
+                for _ in 0..count { app.open_delete_confirm(); }
+                return;
+            }
+            // y<motion> — yank
+            ('y', KeyCode::Char('y')) => {
+                for _ in 0..count { app.yank_selected(); }
+                return;
+            }
+            _ => {} // unknown sequence
+        }
+        return;
+    }
+
     match code {
-        // ─── Quit ──────────────────────────────────────────
+        // ─── Quit ──────────────────────────────────────────────────
         KeyCode::Char('q') => app.should_quit = true,
 
-        // ─── Navigation ────────────────────────────────────
-        KeyCode::Char('j') | KeyCode::Down => app.move_down(),
-        KeyCode::Char('k') | KeyCode::Up => app.move_up(),
-        KeyCode::Char('h') | KeyCode::Left => app.focus_left(),
-        KeyCode::Char('l') | KeyCode::Right => app.focus_right(),
-        KeyCode::Char('g') => {
-            app.pending_key = Some('g'); // wait for second 'g'
+        // ─── Navigation (count-aware) ───────────────────────────────
+        KeyCode::Char('j') | KeyCode::Down => {
+            let n = app.count_or_one();
+            app.reset_vim_count();
+            app.move_down_n(n);
         }
-        KeyCode::Char('G') => app.move_to_bottom(),
-        KeyCode::Enter => {
-            if app.active_panel == app::ActivePanel::Sidebar {
-                app.select_sidebar_item();
-            }
+        KeyCode::Char('k') | KeyCode::Up => {
+            let n = app.count_or_one();
+            app.reset_vim_count();
+            app.move_up_n(n);
         }
+        KeyCode::Char('h') | KeyCode::Left  => { app.reset_vim_count(); app.focus_left(); }
+        KeyCode::Char('l') | KeyCode::Right => { app.reset_vim_count(); app.focus_right(); }
 
-        // Half-page scroll
+        // ─── Pending leaders: g / z / m / ' / d / y ───────────────
+        KeyCode::Char('g') => { app.pending_key = Some('g'); }
+        KeyCode::Char('z') => { app.pending_key = Some('z'); }
+        KeyCode::Char('m') => { app.pending_key = Some('m'); }
+        KeyCode::Char('\'') => { app.pending_key = Some('\''); }
+        KeyCode::Char('d') if !modifiers.contains(KeyModifiers::CONTROL) => {
+            app.pending_key = Some('d');
+        }
+        KeyCode::Char('y') => { app.pending_key = Some('y'); }
+
+        // ─── G / 0 / $ ─────────────────────────────────────────────
+        KeyCode::Char('G') => { app.reset_vim_count(); app.move_to_bottom(); }
+        KeyCode::Char('0') => { app.reset_vim_count(); app.move_to_top(); }
+
+        // ─── Half-page scroll ───────────────────────────────────────
         KeyCode::Char('d') if modifiers.contains(KeyModifiers::CONTROL) => {
-            for _ in 0..10 {
-                app.move_down();
-            }
+            let n = 10 * app.count_or_one();
+            app.reset_vim_count();
+            app.move_down_n(n);
         }
         KeyCode::Char('u') if modifiers.contains(KeyModifiers::CONTROL) => {
-            for _ in 0..10 {
-                app.move_up();
-            }
+            let n = 10 * app.count_or_one();
+            app.reset_vim_count();
+            app.move_up_n(n);
         }
 
-        // ─── Book Operations ───────────────────────────────
-        KeyCode::Char('a') => app.open_add_popup(),
-        KeyCode::Char('d') if !modifiers.contains(KeyModifiers::CONTROL) => {
-            app.open_delete_confirm();
+        // ─── Undo / Redo ────────────────────────────────────────────
+        KeyCode::Char('u') if !modifiers.contains(KeyModifiers::CONTROL) => {
+            app.reset_vim_count();
+            app.undo();
         }
-        KeyCode::Char('o') => app.open_selected_book(),
+        KeyCode::Char('r') if modifiers.contains(KeyModifiers::CONTROL) => {
+            app.reset_vim_count();
+            app.redo();
+        }
+
+        // ─── Book Operations ────────────────────────────────────────
+        KeyCode::Char('a') => { app.reset_vim_count(); app.open_add_popup(); }
+        KeyCode::Char('o') => { app.reset_vim_count(); app.open_selected_book(); }
         KeyCode::Char('R') => {
-            // Quick rating popup — show in status bar
+            app.reset_vim_count();
             app.popup = Some(Popup::SetRating {
                 id: app.selected_book().map(|b| b.id.to_string()).unwrap_or_default(),
                 current: app.selected_book().and_then(|b| b.rating),
             });
         }
-        KeyCode::Char('s') => app.cycle_status(),
-        KeyCode::Char('t') => app.open_edit_tags(),
-        KeyCode::Char('y') => app.yank_path(),
-        KeyCode::Char('v') => app.toggle_visual_select(),
+        KeyCode::Char('s') => { app.reset_vim_count(); app.cycle_status(); }
+        KeyCode::Char('t') => { app.reset_vim_count(); app.open_edit_tags(); }
 
-        // ─── Modes ─────────────────────────────────────────
+        // ─── Sorting ────────────────────────────────────────────────
+        KeyCode::Char('S') => { app.reset_vim_count(); app.cycle_sort(); }
+
+        // ─── Modes ──────────────────────────────────────────────────
         KeyCode::Char(':') => {
+            app.reset_vim_count();
             app.mode = Mode::Command;
             app.command_input.clear();
         }
-        KeyCode::Char('/') => app.open_telescope(),
+        KeyCode::Char('/') => {
+            app.reset_vim_count();
+            app.open_telescope();
+        }
 
-        // ─── Help ──────────────────────────────────────────
-        KeyCode::Char('?') => app.show_help(),
+        // ─── Enter ──────────────────────────────────────────────────
+        KeyCode::Enter => {
+            app.reset_vim_count();
+            if app.active_panel == app::ActivePanel::Sidebar {
+                app.select_sidebar_item();
+            }
+        }
 
-        // Tab to switch panels
-        KeyCode::Tab => app.focus_right(),
-        KeyCode::BackTab => app.focus_left(),
+        // ─── Help ────────────────────────────────────────────────────
+        KeyCode::Char('?') => { app.reset_vim_count(); app.show_help(); }
 
-        _ => {}
+        // Tab / BackTab
+        KeyCode::Tab    => { app.reset_vim_count(); app.focus_right(); }
+        KeyCode::BackTab => { app.reset_vim_count(); app.focus_left(); }
+
+        _ => { app.reset_vim_count(); }
     }
 }
 

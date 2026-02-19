@@ -644,6 +644,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "omniscope-ai"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "omniscope-core",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "omniscope-cli"
 version = "0.1.0"
 dependencies = [
@@ -673,6 +684,36 @@ dependencies = [
  "thiserror",
  "toml",
  "uuid",
+]
+
+[[package]]
+name = "omniscope-ffi"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "omniscope-core",
+]
+
+[[package]]
+name = "omniscope-science"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "omniscope-core",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
+name = "omniscope-server"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "omniscope-core",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]

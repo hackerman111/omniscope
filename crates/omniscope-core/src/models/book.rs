@@ -2,6 +2,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::models::ai_types::{BookCitationGraph, BookPublication, ScientificIdentifiers};
+
 // ─── BookCard ───────────────────────────────────────────────
 
 /// Full book card — the canonical representation of a book in Omniscope.
@@ -14,6 +16,18 @@ pub struct BookCard {
     pub updated_at: DateTime<Utc>,
 
     pub metadata: BookMetadata,
+
+    /// Scientific identifiers: DOI, arXiv, ISBN-13, PMID, etc.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identifiers: Option<ScientificIdentifiers>,
+
+    /// Publication metadata: journal, conference, doc_type.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub publication: Option<BookPublication>,
+
+    /// Citation graph (populated in Phase 3).
+    #[serde(default)]
+    pub citation_graph: BookCitationGraph,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file: Option<BookFile>,
@@ -44,6 +58,9 @@ impl BookCard {
                 title: title.into(),
                 ..Default::default()
             },
+            identifiers: None,
+            publication: None,
+            citation_graph: BookCitationGraph::default(),
             file: None,
             organization: BookOrganization::default(),
             ai: BookAi::default(),

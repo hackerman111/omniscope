@@ -1,452 +1,13 @@
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph, Wrap};
+use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph};
 use ratatui::Frame;
 
-use crate::app::{ActivePanel, App, Mode, SidebarItem};
 use crate::popup::Popup;
+use super::{colors, truncate, centered_rect};
 
-/// Color palette — Catppuccin Mocha inspired defaults.
-mod colors {
-    use ratatui::style::Color;
-
-    pub const BASE: Color = Color::Rgb(30, 30, 46);
-    pub const SURFACE0: Color = Color::Rgb(49, 50, 68);
-    pub const SURFACE1: Color = Color::Rgb(69, 71, 90);
-    pub const TEXT: Color = Color::Rgb(205, 214, 244);
-    pub const SUBTEXT0: Color = Color::Rgb(166, 173, 200);
-    pub const LAVENDER: Color = Color::Rgb(180, 190, 254);
-    pub const BLUE: Color = Color::Rgb(137, 180, 250);
-    pub const GREEN: Color = Color::Rgb(166, 227, 161);
-    pub const YELLOW: Color = Color::Rgb(249, 226, 175);
-    pub const PEACH: Color = Color::Rgb(250, 179, 135);
-    pub const RED: Color = Color::Rgb(243, 139, 168);
-    pub const MAUVE: Color = Color::Rgb(203, 166, 247);
-}
-
-/// Render the entire UI.
-pub fn render(frame: &mut Frame, app: &App) {
-    let size = frame.area();
-
-    // Main vertical layout: header + body + status bar
-    let main_layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1), // header
-            Constraint::Min(3),   // body
-            Constraint::Length(1), // status bar
-        ])
-        .split(size);
-
-    render_header(frame, app, main_layout[0]);
-    render_body(frame, app, main_layout[1]);
-    render_status_bar(frame, app, main_layout[2]);
-
-    // Popup overlay (on top of everything)
-    if let Some(ref popup) = app.popup {
-        render_popup(frame, popup, size);
-    }
-}
-
-// ─── Header ────────────────────────────────────────────────
-
-fn render_header(frame: &mut Frame, app: &App, area: Rect) {
-    let mode_style = match app.mode {
-        Mode::Normal => Style::default().fg(colors::BLUE).add_modifier(Modifier::BOLD),
-        Mode::Insert => Style::default().fg(colors::GREEN).add_modifier(Modifier::BOLD),
-        Mode::Search => Style::default().fg(colors::YELLOW).add_modifier(Modifier::BOLD),
-        Mode::Command => Style::default().fg(colors::PEACH).add_modifier(Modifier::BOLD),
-        Mode::Visual => Style::default().fg(colors::MAUVE).add_modifier(Modifier::BOLD),
-    };
-
-    let filter_text = match &app.sidebar_filter {
-        crate::app::SidebarFilter::All => "All books".to_string(),
-        crate::app::SidebarFilter::Library(name) => format!("📁 {name}"),
-        crate::app::SidebarFilter::Tag(name) => format!("#{name}"),
-    };
-
-    let header = Line::from(vec![
-        Span::styled(" 󰂺 omniscope ", Style::default().fg(colors::LAVENDER).add_modifier(Modifier::BOLD)),
-        Span::styled(format!("  {filter_text}  "), Style::default().fg(colors::SUBTEXT0)),
-        Span::raw(" ".repeat(area.width.saturating_sub(filter_text.len() as u16 + 30) as usize)),
-        Span::styled(format!(" {} ", app.mode), mode_style),
-    ]);
-
-    frame.render_widget(
-        Paragraph::new(header).style(Style::default().bg(colors::SURFACE0)),
-        area,
-    );
-}
-
-// ─── Body (3 panels) ───────────────────────────────────────
-
-fn render_body(frame: &mut Frame, app: &App, area: Rect) {
-    let panels = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(20),
-            Constraint::Percentage(45),
-            Constraint::Percentage(35),
-        ])
-        .split(area);
-
-    render_sidebar(frame, app, panels[0]);
-    render_book_list(frame, app, panels[1]);
-    render_preview(frame, app, panels[2]);
-}
-
-fn render_sidebar(frame: &mut Frame, app: &App, area: Rect) {
-    let is_focused = app.active_panel == ActivePanel::Sidebar;
-    let border_color = if is_focused { colors::LAVENDER } else { colors::SURFACE1 };
-
-    let block = Block::default()
-        .title(" Libraries ")
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(border_color))
-        .style(Style::default().bg(colors::BASE));
-
-    let items: Vec<ListItem> = app
-        .sidebar_items
-        .iter()
-        .enumerate()
-        .map(|(i, item)| {
-            let is_selected = i == app.sidebar_selected && is_focused;
-            let (text, style) = match item {
-                SidebarItem::AllBooks { count } => {
-                    let prefix = if is_selected { "▶ " } else { "  " };
-                    (
-                        format!("{prefix}📚 All [{count}]"),
-                        Style::default().fg(colors::TEXT),
-                    )
-                }
-                SidebarItem::Library { name, count } => {
-                    let prefix = if is_selected { "▶ " } else { "  " };
-                    (
-                        format!("{prefix}📁 {name} [{count}]"),
-                        Style::default().fg(colors::PEACH),
-                    )
-                }
-                SidebarItem::TagHeader => (
-                    " ─ Tags ─".to_string(),
-                    Style::default()
-                        .fg(colors::SUBTEXT0)
-                        .add_modifier(Modifier::DIM),
-                ),
-                SidebarItem::Tag { name, count } => {
-                    let prefix = if is_selected { "▶ " } else { "  " };
-                    (
-                        format!("{prefix}#{name} [{count}]"),
-                        Style::default().fg(colors::BLUE),
-                    )
-                }
-                SidebarItem::FolderHeader => (
-                    " ─ Folders ─".to_string(),
-                    Style::default()
-                        .fg(colors::SUBTEXT0)
-                        .add_modifier(Modifier::DIM),
-                ),
-                SidebarItem::Folder { path } => {
-                    let prefix = if is_selected { "▶ " } else { "  " };
-                    (
-                        format!("{prefix}📂 {path}"),
-                        Style::default().fg(colors::GREEN),
-                    )
-                }
-            };
-
-            let item_style = if is_selected {
-                style.bg(colors::SURFACE0)
-            } else {
-                style
-            };
-
-            ListItem::new(Span::styled(text, item_style))
-        })
-        .collect();
-
-    let list = List::new(items).block(block);
-    frame.render_widget(list, area);
-}
-
-fn render_book_list(frame: &mut Frame, app: &App, area: Rect) {
-    let is_focused = app.active_panel == ActivePanel::BookList;
-    let border_color = if is_focused { colors::LAVENDER } else { colors::SURFACE1 };
-
-    let title = if !app.search_input.is_empty() && app.mode == Mode::Search {
-        format!(" Search: {} ({}) ", app.search_input, app.books.len())
-    } else {
-        format!(" Books ({}) ", app.books.len())
-    };
-
-    let block = Block::default()
-        .title(title)
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(border_color))
-        .style(Style::default().bg(colors::BASE));
-
-    if app.books.is_empty() {
-        let empty_msg = Paragraph::new(vec![
-            Line::from(""),
-            Line::from(Span::styled(
-                "  No books yet",
-                Style::default().fg(colors::SUBTEXT0),
-            )),
-            Line::from(""),
-            Line::from(Span::styled(
-                "  Press 'a' to add a book",
-                Style::default().fg(colors::SUBTEXT0).add_modifier(Modifier::DIM),
-            )),
-            Line::from(Span::styled(
-                "  or use: omniscope add <file>",
-                Style::default().fg(colors::SUBTEXT0).add_modifier(Modifier::DIM),
-            )),
-        ])
-        .block(block);
-        frame.render_widget(empty_msg, area);
-        return;
-    }
-
-    // Calculate visible range for virtual scrolling
-    let inner = block.inner(area);
-    let visible_height = inner.height as usize;
-    let scroll_offset = if app.selected_index >= visible_height {
-        app.selected_index - visible_height + 1
-    } else {
-        0
-    };
-
-    let items: Vec<ListItem> = app
-        .books
-        .iter()
-        .enumerate()
-        .skip(scroll_offset)
-        .take(visible_height)
-        .map(|(i, book)| {
-            let is_selected = i == app.selected_index;
-            let is_visual = app.visual_selections.contains(&i);
-            let prefix = if is_selected && is_focused {
-                "▶ "
-            } else if is_visual {
-                "● "
-            } else {
-                "  "
-            };
-
-            let status_icon = match book.read_status {
-                omniscope_core::ReadStatus::Read => "✓",
-                omniscope_core::ReadStatus::Reading => "◐",
-                omniscope_core::ReadStatus::Dnf => "✗",
-                omniscope_core::ReadStatus::Unread => "○",
-            };
-
-            let rating = match book.rating {
-                Some(5) => "★★★★★",
-                Some(4) => "★★★★☆",
-                Some(3) => "★★★☆☆",
-                Some(2) => "★★☆☆☆",
-                Some(1) => "★☆☆☆☆",
-                _ => "     ",
-            };
-
-            let year_str = book
-                .year
-                .map(|y| y.to_string())
-                .unwrap_or_else(|| "----".to_string());
-
-            let format_str = book
-                .format
-                .map(|f| f.to_string())
-                .unwrap_or_else(|| "---".to_string());
-
-            let max_title = (inner.width as usize).saturating_sub(30);
-            let line = Line::from(vec![
-                Span::styled(prefix, Style::default().fg(colors::LAVENDER)),
-                Span::styled(status_icon, Style::default().fg(match book.read_status {
-                    omniscope_core::ReadStatus::Read => colors::GREEN,
-                    omniscope_core::ReadStatus::Reading => colors::YELLOW,
-                    omniscope_core::ReadStatus::Dnf => colors::RED,
-                    omniscope_core::ReadStatus::Unread => colors::SURFACE1,
-                })),
-                Span::raw(" "),
-                Span::styled(
-                    truncate(&book.title, max_title),
-                    Style::default().fg(colors::TEXT),
-                ),
-                Span::raw("  "),
-                Span::styled(rating, Style::default().fg(colors::YELLOW)),
-                Span::raw(" "),
-                Span::styled(year_str, Style::default().fg(colors::SUBTEXT0)),
-                Span::raw(" "),
-                Span::styled(format_str, Style::default().fg(colors::BLUE)),
-            ]);
-
-            let style = if is_selected && is_focused {
-                Style::default().bg(colors::SURFACE0)
-            } else if is_visual {
-                Style::default().bg(colors::SURFACE1)
-            } else {
-                Style::default()
-            };
-
-            ListItem::new(line).style(style)
-        })
-        .collect();
-
-    let list = List::new(items).block(block);
-    frame.render_widget(list, area);
-}
-
-fn render_preview(frame: &mut Frame, app: &App, area: Rect) {
-    let is_focused = app.active_panel == ActivePanel::Preview;
-    let border_color = if is_focused { colors::LAVENDER } else { colors::SURFACE1 };
-
-    let block = Block::default()
-        .title(" Preview ")
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(border_color))
-        .style(Style::default().bg(colors::BASE));
-
-    let content = if let Some(book) = app.selected_book() {
-        let authors = if book.authors.is_empty() {
-            "Unknown".to_string()
-        } else {
-            book.authors.join(", ")
-        };
-
-        let year = book
-            .year
-            .map(|y| y.to_string())
-            .unwrap_or_else(|| "—".to_string());
-
-        let tags = if book.tags.is_empty() {
-            "—".to_string()
-        } else {
-            book.tags.iter().map(|t| format!("#{t}")).collect::<Vec<_>>().join(" ")
-        };
-
-        let rating = match book.rating {
-            Some(r) => "★".repeat(r as usize) + &"☆".repeat(5 - r as usize),
-            None => "—".to_string(),
-        };
-
-        let file_info = if book.has_file {
-            format!("✓ file attached ({})", book.format.map(|f| f.to_string()).unwrap_or("?".to_string()))
-        } else {
-            "✗ no file".to_string()
-        };
-
-        vec![
-            Line::from(""),
-            Line::from(Span::styled(
-                format!("  📖 {}", book.title),
-                Style::default()
-                    .fg(colors::LAVENDER)
-                    .add_modifier(Modifier::BOLD),
-            )),
-            Line::from(""),
-            Line::from(vec![
-                Span::styled("  Authors: ", Style::default().fg(colors::SUBTEXT0)),
-                Span::styled(authors, Style::default().fg(colors::TEXT)),
-            ]),
-            Line::from(vec![
-                Span::styled("  Year:    ", Style::default().fg(colors::SUBTEXT0)),
-                Span::styled(year, Style::default().fg(colors::TEXT)),
-            ]),
-            Line::from(vec![
-                Span::styled("  Status:  ", Style::default().fg(colors::SUBTEXT0)),
-                Span::styled(
-                    book.read_status.to_string(),
-                    Style::default().fg(match book.read_status {
-                        omniscope_core::ReadStatus::Read => colors::GREEN,
-                        omniscope_core::ReadStatus::Reading => colors::YELLOW,
-                        omniscope_core::ReadStatus::Dnf => colors::RED,
-                        omniscope_core::ReadStatus::Unread => colors::SUBTEXT0,
-                    }),
-                ),
-            ]),
-            Line::from(vec![
-                Span::styled("  Rating:  ", Style::default().fg(colors::SUBTEXT0)),
-                Span::styled(rating, Style::default().fg(colors::YELLOW)),
-            ]),
-            Line::from(vec![
-                Span::styled("  Tags:    ", Style::default().fg(colors::SUBTEXT0)),
-                Span::styled(tags, Style::default().fg(colors::BLUE)),
-            ]),
-            Line::from(vec![
-                Span::styled("  File:    ", Style::default().fg(colors::SUBTEXT0)),
-                Span::styled(file_info, Style::default().fg(
-                    if book.has_file { colors::GREEN } else { colors::RED }
-                )),
-            ]),
-            Line::from(""),
-            Line::from(Span::styled(
-                "  [o]pen [R]ate [s]tatus [t]ags [?]help",
-                Style::default().fg(colors::SUBTEXT0).add_modifier(Modifier::DIM),
-            )),
-        ]
-    } else {
-        vec![
-            Line::from(""),
-            Line::from(Span::styled(
-                "  Select a book to preview",
-                Style::default().fg(colors::SUBTEXT0),
-            )),
-        ]
-    };
-
-    let preview = Paragraph::new(content).block(block).wrap(Wrap { trim: false });
-    frame.render_widget(preview, area);
-}
-
-// ─── Status Bar ────────────────────────────────────────────
-
-fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
-    let content = match app.mode {
-        Mode::Command => {
-            Line::from(vec![
-                Span::styled(":", Style::default().fg(colors::PEACH)),
-                Span::styled(&app.command_input, Style::default().fg(colors::TEXT)),
-                Span::styled("█", Style::default().fg(colors::TEXT)),
-            ])
-        }
-        Mode::Search => {
-            Line::from(vec![
-                Span::styled("/", Style::default().fg(colors::YELLOW)),
-                Span::styled(&app.search_input, Style::default().fg(colors::TEXT)),
-                Span::styled("█", Style::default().fg(colors::TEXT)),
-            ])
-        }
-        _ => {
-            if app.status_message.is_empty() {
-                Line::from(vec![
-                    Span::styled(" ?", Style::default().fg(colors::SUBTEXT0)),
-                    Span::styled(":help  ", Style::default().fg(colors::SUBTEXT0).add_modifier(Modifier::DIM)),
-                    Span::styled("/", Style::default().fg(colors::SUBTEXT0)),
-                    Span::styled(":search  ", Style::default().fg(colors::SUBTEXT0).add_modifier(Modifier::DIM)),
-                    Span::styled("a", Style::default().fg(colors::SUBTEXT0)),
-                    Span::styled(":add  ", Style::default().fg(colors::SUBTEXT0).add_modifier(Modifier::DIM)),
-                    Span::styled("q", Style::default().fg(colors::SUBTEXT0)),
-                    Span::styled(":quit", Style::default().fg(colors::SUBTEXT0).add_modifier(Modifier::DIM)),
-                ])
-            } else {
-                Line::from(Span::styled(
-                    format!(" {}", app.status_message),
-                    Style::default().fg(colors::TEXT),
-                ))
-            }
-        }
-    };
-
-    frame.render_widget(
-        Paragraph::new(content).style(Style::default().bg(colors::SURFACE0)),
-        area,
-    );
-}
-
-// ─── Popup Overlay ─────────────────────────────────────────
-
-fn render_popup(frame: &mut Frame, popup: &Popup, area: Rect) {
+pub(crate) fn render_popup(frame: &mut Frame, popup: &Popup, area: Rect) {
     match popup {
         Popup::AddBook(form) => {
             let popup_area = centered_rect(60, 50, area);
@@ -497,14 +58,10 @@ fn render_popup(frame: &mut Frame, popup: &Popup, area: Rect) {
 
             // ── Autocomplete Dropdown ──
             if form.autocomplete.active && !form.autocomplete.visible.is_empty() {
-                // Determine position
-                // "File path" is index 5, so Line 5 relative to inner.
-                // We want to draw it below the input line.
-                // "  File path: " is approx 13 chars wide.
                 let x = inner.x + 13;
                 let y = inner.y + 6;
                 let width = (inner.width as u16).saturating_sub(15).max(20);
-                let height = form.autocomplete.visible.len().min(5) as u16 + 2; // +2 for borders
+                let height = form.autocomplete.visible.len().min(5) as u16 + 2;
 
                 let sug_area = Rect { x, y, width, height };
                 frame.render_widget(Clear, sug_area);
@@ -753,7 +310,6 @@ fn render_popup(frame: &mut Frame, popup: &Popup, area: Rect) {
             let results_area = results_preview[0];
             let result_count = state.results.len();
             let visible_h = results_area.height as usize;
-            // Use state.scroll that we added to TelescopeState
             let scroll_off = state.scroll;
 
             let result_items: Vec<ListItem> = state.results.iter()
@@ -880,9 +436,7 @@ fn render_popup(frame: &mut Frame, popup: &Popup, area: Rect) {
 
             // ── Autocomplete suggestions (overlay) ──
             if state.autocomplete.active && !state.autocomplete.visible.is_empty() {
-                // Determine X position based on cursor logic (approximate)
-                // We'll place it slightly offset from the start for now
-                let sug_height = state.autocomplete.visible.len().min(8) as u16 + 2; // +2 for borders
+                let sug_height = state.autocomplete.visible.len().min(8) as u16 + 2;
                 let sug_area = Rect {
                     x: telescope_layout[0].x + 4,
                     y: telescope_layout[0].y + 1,
@@ -949,35 +503,64 @@ fn render_popup(frame: &mut Frame, popup: &Popup, area: Rect) {
             let inner = block.inner(popup_area);
             frame.render_widget(block, popup_area);
 
+            let dim  = Style::default().fg(colors::SUBTEXT0).add_modifier(Modifier::DIM);
+            let key  = Style::default().fg(colors::LAVENDER).add_modifier(Modifier::BOLD);
+            let desc = Style::default().fg(colors::TEXT);
+            let head = Style::default().fg(colors::BLUE).add_modifier(Modifier::BOLD);
+
+            macro_rules! kv {
+                ($k:expr, $d:expr) => {
+                    Line::from(vec![
+                        Span::styled(format!("  {:<14}", $k), key),
+                        Span::styled($d, desc),
+                    ])
+                };
+            }
+
             let lines = vec![
-                Line::from(Span::styled(" Navigation", Style::default().fg(colors::LAVENDER).add_modifier(Modifier::BOLD))),
-                Line::from(Span::styled("  j/k        Move down/up", Style::default().fg(colors::TEXT))),
-                Line::from(Span::styled("  h/l        Switch panels left/right", Style::default().fg(colors::TEXT))),
-                Line::from(Span::styled("  gg/G       Jump to top/bottom", Style::default().fg(colors::TEXT))),
-                Line::from(Span::styled("  Ctrl-d/u   Half-page scroll", Style::default().fg(colors::TEXT))),
-                Line::from(Span::styled("  Tab        Next panel", Style::default().fg(colors::TEXT))),
+                // ── Navigation ──────────────────────────────────────────
+                Line::from(Span::styled(" Navigation", head)),
+                kv!("[N]j / [N]k",  "Move down / up  (N = count, e.g. 5j)"),
+                kv!("h / l",         "Switch panel left / right"),
+                kv!("gg / G",        "Jump to top / bottom"),
+                kv!("0",             "Jump to top (alternate)"),
+                kv!("Ctrl-d/u",      "Half-page scroll down / up"),
+                kv!("Tab / S-Tab",   "Next / previous panel"),
                 Line::from(""),
-                Line::from(Span::styled(" Book Operations", Style::default().fg(colors::LAVENDER).add_modifier(Modifier::BOLD))),
-                Line::from(Span::styled("  a          Add new book", Style::default().fg(colors::TEXT))),
-                Line::from(Span::styled("  d          Delete book", Style::default().fg(colors::TEXT))),
-                Line::from(Span::styled("  o          Open in viewer", Style::default().fg(colors::TEXT))),
-                Line::from(Span::styled("  R          Set rating (1-5)", Style::default().fg(colors::TEXT))),
-                Line::from(Span::styled("  s          Cycle read status", Style::default().fg(colors::TEXT))),
-                Line::from(Span::styled("  t          Edit tags", Style::default().fg(colors::TEXT))),
-                Line::from(Span::styled("  y          Yank file path", Style::default().fg(colors::TEXT))),
-                Line::from(Span::styled("  v          Visual select", Style::default().fg(colors::TEXT))),
+                // ── Book Operations ──────────────────────────────────────
+                Line::from(Span::styled(" Book Operations", head)),
+                kv!("a",            "Add new book"),
+                kv!("dd",           "Delete book (with confirm)"),
+                kv!("o",            "Open file in viewer"),
+                kv!("R / gr",       "Set rating 1–5"),
+                kv!("s / gs",       "Cycle read status"),
+                kv!("t",            "Edit tags"),
+                kv!("yy",           "Yank book into register"),
+                kv!("gt",           "Quick-edit title"),
                 Line::from(""),
-                Line::from(Span::styled(" Search & Commands", Style::default().fg(colors::LAVENDER).add_modifier(Modifier::BOLD))),
-                Line::from(Span::styled("  /          Telescope search (DSL)", Style::default().fg(colors::TEXT))),
-                Line::from(Span::styled("  :          Command mode", Style::default().fg(colors::TEXT))),
-                Line::from(Span::styled("  q          Quit", Style::default().fg(colors::TEXT))),
+                // ── Vim Extras ───────────────────────────────────────────
+                Line::from(Span::styled(" Vim Extras", head)),
+                kv!("u",            "Undo last edit"),
+                kv!("Ctrl-r",       "Redo"),
+                kv!("S",            "Cycle sort order"),
+                kv!("m<a-z>",       "Set named mark"),
+                kv!("'<a-z>",       "Jump to named mark"),
+                kv!("zz",           "Show current line number"),
                 Line::from(""),
-                Line::from(Span::styled(" DSL Syntax", Style::default().fg(colors::LAVENDER).add_modifier(Modifier::BOLD))),
-                Line::from(Span::styled("  @author:name  #tag  y:2020-2023", Style::default().fg(colors::TEXT))),
-                Line::from(Span::styled("  r:>=4  s:unread  f:pdf  has:file", Style::default().fg(colors::TEXT))),
-                Line::from(Span::styled("  NOT #python  lib:programming", Style::default().fg(colors::TEXT))),
+                // ── Search & Commands ────────────────────────────────────
+                Line::from(Span::styled(" Search & Commands", head)),
+                kv!("/",            "Telescope fuzzy search (DSL)"),
+                kv!(":",            "Command mode  (:q :w :sort ...)"),
+                kv!("q",            "Quit"),
+                kv!("?",            "This help"),
                 Line::from(""),
-                Line::from(Span::styled(" Press any key to close", Style::default().fg(colors::SUBTEXT0).add_modifier(Modifier::DIM))),
+                // ── DSL Syntax ───────────────────────────────────────────
+                Line::from(Span::styled(" Search DSL", head)),
+                Line::from(Span::styled("  @author:name  #tag  y:2020-2023", desc)),
+                Line::from(Span::styled("  r:>=4  s:unread  f:pdf  has:file", desc)),
+                Line::from(Span::styled("  NOT #python  lib:programming", desc)),
+                Line::from(""),
+                Line::from(Span::styled(" Press any key to close", dim)),
             ];
 
             frame.render_widget(Paragraph::new(lines), inner);
@@ -987,36 +570,4 @@ fn render_popup(frame: &mut Frame, popup: &Popup, area: Rect) {
             // Cycle status is handled inline by 's'
         }
     }
-}
-
-// ─── Helpers ───────────────────────────────────────────────
-
-fn truncate(s: &str, max: usize) -> String {
-    if s.chars().count() <= max {
-        format!("{s:<max$}")
-    } else {
-        let truncated: String = s.chars().take(max.saturating_sub(1)).collect();
-        format!("{truncated}…")
-    }
-}
-
-/// Create a centered rectangle.
-fn centered_rect(percent_x: u16, percent_y: u16, r: Rect) -> Rect {
-    let popup_layout = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Percentage((100 - percent_y) / 2),
-            Constraint::Percentage(percent_y),
-            Constraint::Percentage((100 - percent_y) / 2),
-        ])
-        .split(r);
-
-    Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage((100 - percent_x) / 2),
-            Constraint::Percentage(percent_x),
-            Constraint::Percentage((100 - percent_x) / 2),
-        ])
-        .split(popup_layout[1])[1]
 }

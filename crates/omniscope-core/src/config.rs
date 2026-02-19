@@ -249,6 +249,16 @@ impl AppConfig {
     pub fn covers_dir(&self) -> PathBuf {
         PathBuf::from(&self.core.library_path).join("covers")
     }
+
+    /// Returns the library root path.
+    pub fn library_path(&self) -> PathBuf {
+        PathBuf::from(&self.core.library_path)
+    }
+
+    /// Override the library root path (used for OMNISCOPE_LIBRARY_PATH env var).
+    pub fn set_library_path(&mut self, path: PathBuf) {
+        self.core.library_path = path.to_string_lossy().to_string();
+    }
 }
 
 #[cfg(test)]

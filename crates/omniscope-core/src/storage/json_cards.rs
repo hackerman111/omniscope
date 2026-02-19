@@ -5,12 +5,18 @@ use crate::error::Result;
 use crate::models::BookCard;
 
 /// Save a BookCard as a JSON file: `{cards_dir}/{id}.json`.
+///
+/// Uses an atomic write (write to `.tmp` file then `rename`) so the card
+/// file is never in a half-written state if the process crashes.
 pub fn save_card(cards_dir: &Path, card: &BookCard) -> Result<PathBuf> {
     fs::create_dir_all(cards_dir)?;
-    let path = cards_dir.join(format!("{}.json", card.id));
+    let final_path = cards_dir.join(format!("{}.json", card.id));
+    let tmp_path = cards_dir.join(format!("{}.json.tmp", card.id));
+
     let json = serde_json::to_string_pretty(card)?;
-    fs::write(&path, json)?;
-    Ok(path)
+    fs::write(&tmp_path, json)?;
+    fs::rename(&tmp_path, &final_path)?;
+    Ok(final_path)
 }
 
 /// Load a single BookCard from a JSON file.
@@ -118,5 +124,20 @@ mod tests {
     fn test_list_cards_nonexistent_dir() {
         let cards = list_cards(Path::new("/tmp/nonexistent_omniscope_dir")).unwrap();
         assert!(cards.is_empty());
+    }
+
+    #[test]
+    fn test_atomic_write_no_tmp_left() {
+        let dir = TempDir::new().unwrap();
+        let cards_dir = dir.path().join("cards");
+
+        let card = BookCard::new("Atomic Test");
+        let id = card.id;
+        save_card(&cards_dir, &card).unwrap();
+
+        // The final file must exist
+        assert!(cards_dir.join(format!("{id}.json")).exists());
+        // The temp file must NOT exist
+        assert!(!cards_dir.join(format!("{id}.json.tmp")).exists());
     }
 }
