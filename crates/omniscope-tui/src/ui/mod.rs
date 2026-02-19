@@ -59,7 +59,7 @@ fn render_header(frame: &mut Frame, app: &App, area: Rect) {
         Mode::Insert  => Style::default().fg(colors::GREEN).add_modifier(Modifier::BOLD),
         Mode::Search  => Style::default().fg(colors::YELLOW).add_modifier(Modifier::BOLD),
         Mode::Command => Style::default().fg(colors::PEACH).add_modifier(Modifier::BOLD),
-        Mode::Visual  => Style::default().fg(colors::MAUVE).add_modifier(Modifier::BOLD),
+        Mode::Visual | Mode::VisualLine | Mode::VisualBlock => Style::default().fg(colors::MAUVE).add_modifier(Modifier::BOLD),
         // Pending: orange — signals waiting for a second key (e.g. after 'd')
         Mode::Pending => Style::default().fg(colors::PEACH).add_modifier(Modifier::BOLD),
     };

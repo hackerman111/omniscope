@@ -4,7 +4,6 @@ mod sidebar;
 mod vim;
 
 use omniscope_core::{AppConfig, BookCard, BookSummaryView, Database, FuzzySearcher};
-
 use crate::popup::Popup;
 
 /// Vim-like modes for the TUI.
@@ -15,7 +14,8 @@ pub enum Mode {
     Search,
     Command,
     Visual,
-    /// Waiting for a motion after an operator (e.g. after pressing `d`).
+    VisualLine,
+    VisualBlock,
     Pending,
 }
 
@@ -27,9 +27,27 @@ impl std::fmt::Display for Mode {
             Self::Search  => write!(f, "SEARCH"),
             Self::Command => write!(f, "COMMAND"),
             Self::Visual  => write!(f, "VISUAL"),
+            Self::VisualLine => write!(f, "VISUAL-LINE"),
+            Self::VisualBlock => write!(f, "VISUAL-BLOCK"),
             Self::Pending => write!(f, "PENDING"),
         }
     }
+}
+
+/// Content stored in a register.
+#[derive(Debug, Clone)]
+pub enum RegisterContent {
+    Card(BookCard),
+    Path(String),
+    Text(String),
+    MultipleCards(Vec<BookCard>),
+}
+
+/// A vim-style register.
+#[derive(Debug, Clone)]
+pub struct Register {
+    pub content: RegisterContent,
+    pub is_append: bool,
 }
 
 /// Which panel currently has focus.
@@ -137,6 +155,8 @@ pub struct App {
 
     /// Visual mode selection indices.
     pub visual_selections: Vec<usize>,
+    /// Index where visual selection started.
+    pub visual_anchor: Option<usize>,
 
     /// Fuzzy searcher instance.
     pub fuzzy_searcher: FuzzySearcher,
@@ -155,7 +175,14 @@ pub struct App {
     /// Pending operator (e.g. `d`, `y`, `c`) waiting for a motion.
     pub vim_operator: Option<char>,
 
-    /// Undo stack: each entry holds the BookCard before modification.
+    /// Pending register selection (e.g. `"` waiting for char).
+    pub pending_register_select: bool,
+    /// Selected register for the next operation (default is unnamed `"`).
+    pub vim_register: Option<char>,
+    /// Registers storage.
+    pub registers: std::collections::HashMap<char, Register>,
+
+    /// Undo stack.
     pub undo_stack: Vec<UndoEntry>,
 
     /// Redo stack.
@@ -164,7 +191,7 @@ pub struct App {
     /// Named marks: single-char key → book-list index.
     pub marks: std::collections::HashMap<char, usize>,
 
-    /// Yank register: last-yanked BookSummaryView.
+    /// Yank register: last-yanked BookSummaryView (legacy/default).
     pub yank_register: Option<BookSummaryView>,
 
     /// Current sort order for the book list.
@@ -215,12 +242,16 @@ impl App {
             popup: None,
             pending_key: None,
             visual_selections: Vec::new(),
+            visual_anchor: None,
             fuzzy_searcher: FuzzySearcher::new(),
             db,
             config,
             // Phase 1 fields
             vim_count: 0,
             vim_operator: None,
+            pending_register_select: false,
+            vim_register: None,
+            registers: std::collections::HashMap::new(),
             undo_stack: Vec::new(),
             redo_stack: Vec::new(),
             marks: std::collections::HashMap::new(),

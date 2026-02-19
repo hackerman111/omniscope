@@ -102,6 +102,12 @@ impl AutocompleteState {
         self.selected = None;
         self.active = false;
     }
+
+    pub fn activate(&mut self, candidates: Vec<String>) {
+        self.visible = candidates;
+        self.active = !self.visible.is_empty();
+        self.selected = if self.active { Some(0) } else { None };
+    }
 }
 
 /// State for the Telescope search overlay.
