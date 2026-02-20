@@ -7,6 +7,15 @@ use omniscope_core::{AppConfig, BookCard, BookSummaryView, Database, FuzzySearch
 use crate::popup::Popup;
 use crate::keys::operator::Operator;
 use crate::keys::jump_list::JumpList;
+use crate::keys::macro_recorder::MacroRecorder;
+use crate::theme::NordTheme;
+
+/// Search direction for `/` and `?` searches.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SearchDirection {
+    Forward,
+    Backward,
+}
 
 /// Vim-like modes for the TUI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -211,6 +220,48 @@ pub struct App {
 
     /// Last find-char motion (char we looked for, the motion key used f/F/t/T)
     pub last_find_char: Option<(char, char)>,
+
+    // ─── Phase 2: Viewport & Navigation ─────────────────────
+
+    /// Manual viewport scroll offset (for zz/zt/zb and Ctrl+e/y).
+    pub viewport_offset: usize,
+
+    /// Last position before a jump (for `''` mark).
+    pub last_jump_pos: Option<usize>,
+
+    /// Last visual selection range (start, end) for `gv` and `'<`/`'>`.
+    pub last_visual_range: Option<(usize, usize)>,
+
+    // ─── Phase 2: Search ────────────────────────────────────
+
+    /// Last search query for `n`/`N` repeat.
+    pub last_search: Option<String>,
+
+    /// Current search direction.
+    pub search_direction: SearchDirection,
+
+    // ─── Phase 2: Command History ───────────────────────────
+
+    /// History of executed commands.
+    pub command_history: Vec<String>,
+
+    /// Current position in command history navigation.
+    pub command_history_idx: Option<usize>,
+
+    // ─── Phase 2: Macros ────────────────────────────────────
+
+    /// Macro recorder for q/@ commands.
+    pub macro_recorder: MacroRecorder,
+
+    // ─── Phase 1: AI Panel ──────────────────────────────────
+    pub ai_panel_active: bool,
+    pub ai_input: String,
+
+    /// UI Theme
+    pub theme: NordTheme,
+
+    /// Persistent clipboard instance to avoid "dropped too fast" warnings.
+    pub clipboard: Option<arboard::Clipboard>,
 }
 
 impl App {
@@ -277,6 +328,18 @@ impl App {
             quickfix_show: false,
             quickfix_selected: 0,
             last_find_char: None,
+            viewport_offset: 0,
+            last_jump_pos: None,
+            last_visual_range: None,
+            last_search: None,
+            search_direction: SearchDirection::Forward,
+            command_history: Vec::new(),
+            command_history_idx: None,
+            macro_recorder: MacroRecorder::new(),
+            ai_panel_active: false,
+            ai_input: String::new(),
+            theme: NordTheme::default(),
+            clipboard: arboard::Clipboard::new().ok(),
         };
 
         app.refresh_sidebar();

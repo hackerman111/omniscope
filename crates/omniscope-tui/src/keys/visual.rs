@@ -2,9 +2,20 @@ use crossterm::event::{KeyCode, KeyModifiers};
 use crate::app::{App, Mode};
 
 pub(crate) fn handle_visual_mode(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
-    // ─── Handle pending key sequences (same as Normal) ──────────────────────────
+    // ── Digit accumulation for count prefix ──────────────────────────────
+    if let KeyCode::Char(c) = code {
+        if c.is_ascii_digit() && c != '0' {
+            app.push_vim_digit(c.to_digit(10).unwrap());
+            return;
+        }
+        if c == '0' && app.vim_count > 0 {
+            app.push_vim_digit(0);
+            return;
+        }
+    }
+
+    // ── Handle pending key sequences (same as Normal) ──────────────────────────
     if let Some(pending) = app.pending_key.take() {
-        // let count = app.count_or_one(); // unused for now in visual specific logic
         app.reset_vim_count();
 
         match (pending, code) {
@@ -20,42 +31,82 @@ pub(crate) fn handle_visual_mode(app: &mut App, code: KeyCode, modifiers: KeyMod
     }
 
     match code {
-        KeyCode::Esc => app.exit_visual_mode(),
+        KeyCode::Esc => {
+            // Save visual range before exiting
+            if let Some(anchor) = app.visual_anchor {
+                let start = anchor.min(app.selected_index);
+                let end = anchor.max(app.selected_index);
+                app.last_visual_range = Some((start, end));
+            }
+            app.exit_visual_mode();
+        }
         KeyCode::Char('v') if modifiers.contains(KeyModifiers::CONTROL) => {
             if app.mode == Mode::VisualBlock {
-                app.exit_visual_mode();
+                save_and_exit_visual(app);
             } else {
                 app.enter_visual_mode(Mode::VisualBlock);
             }
         }
         KeyCode::Char('V') => {
             if app.mode == Mode::VisualLine {
-                app.exit_visual_mode();
+                save_and_exit_visual(app);
             } else {
                 app.enter_visual_mode(Mode::VisualLine);
             }
         }
         KeyCode::Char('v') => {
             if app.mode == Mode::Visual {
-                app.exit_visual_mode();
+                save_and_exit_visual(app);
             } else {
                 app.enter_visual_mode(Mode::Visual);
             }
         }
 
+        // o — swap anchor and cursor
+        KeyCode::Char('o') => {
+            if let Some(anchor) = app.visual_anchor {
+                let current = app.selected_index;
+                app.visual_anchor = Some(current);
+                app.selected_index = anchor;
+                app.update_visual_selection();
+            }
+        }
+
+        // Space — toggle individual item selection
+        KeyCode::Char(' ') => {
+            app.toggle_visual_select();
+            // Move down after toggling (like Vim)
+            if app.selected_index < app.books.len().saturating_sub(1) {
+                app.selected_index += 1;
+            }
+            app.status_message = format!("-- VISUAL -- {} selected", app.visual_selections.len());
+        }
+
+        // Ctrl+a — select all
+        KeyCode::Char('a') if modifiers.contains(KeyModifiers::CONTROL) => {
+            app.visual_anchor = Some(0);
+            app.selected_index = app.books.len().saturating_sub(1);
+            app.visual_selections = (0..app.books.len()).collect();
+            app.status_message = format!("-- VISUAL -- {} selected (all)", app.visual_selections.len());
+        }
+
+        // g prefix
+        KeyCode::Char('g') => {
+            app.pending_key = Some('g');
+        }
+
         // Navigation through standard motions
-        // We will catch known motion keys and pass them to Motions.
-        KeyCode::Char(c) if "jkhlGg0$".contains(c) => {
+        KeyCode::Char(c) if "jkhlG0$".contains(c) => {
             let n = app.count_or_one();
             app.reset_vim_count();
             
             // h/l change focus, which exits visual mode
             if c == 'h' {
-                 app.exit_visual_mode();
+                 save_and_exit_visual(app);
                  app.focus_left();
                  return;
             } else if c == 'l' {
-                 app.exit_visual_mode();
+                 save_and_exit_visual(app);
                  app.focus_right();
                  return;
             }
@@ -83,17 +134,16 @@ pub(crate) fn handle_visual_mode(app: &mut App, code: KeyCode, modifiers: KeyMod
         }
         KeyCode::Left => {
              app.reset_vim_count(); 
-             app.exit_visual_mode();
+             save_and_exit_visual(app);
              app.focus_left();
         }
         KeyCode::Right => {
              app.reset_vim_count(); 
-             app.exit_visual_mode();
+             save_and_exit_visual(app);
              app.focus_right(); 
         }
 
         // Half-page scroll
-        // Kept separate as it uses `app.move_down_n` internally, but could be unified if desired.
         KeyCode::Char('d') if modifiers.contains(KeyModifiers::CONTROL) => {
             let n = 10 * app.count_or_one();
             app.reset_vim_count();
@@ -109,16 +159,21 @@ pub(crate) fn handle_visual_mode(app: &mut App, code: KeyCode, modifiers: KeyMod
 
         // Operators
         KeyCode::Char('y') => {
-            // Yank selection
             let selections = app.visual_selections.clone();
             app.yank_indices(&selections); 
-            app.exit_visual_mode();
+            save_and_exit_visual(app);
         }
         KeyCode::Char('d') | KeyCode::Char('x') => {
-             // Delete selection
              let selections = app.visual_selections.clone();
              app.delete_indices(&selections);
-             app.exit_visual_mode();
+             save_and_exit_visual(app);
+        }
+        KeyCode::Char('c') => {
+             // Change: delete selection
+             let selections = app.visual_selections.clone();
+             app.delete_indices(&selections);
+             save_and_exit_visual(app);
+             app.status_message = format!("Changed {} items", selections.len());
         }
 
         // Registers
@@ -126,6 +181,28 @@ pub(crate) fn handle_visual_mode(app: &mut App, code: KeyCode, modifiers: KeyMod
             app.pending_register_select = true;
         }
 
+        // Quickfix send
+        KeyCode::Char('q') if modifiers.contains(KeyModifiers::CONTROL) => {
+            app.quickfix_list = app.visual_selections.iter()
+                .filter_map(|&i| app.books.get(i).cloned())
+                .collect();
+            app.quickfix_show = true;
+            app.quickfix_selected = 0;
+            let count = app.quickfix_list.len();
+            save_and_exit_visual(app);
+            app.status_message = format!("Sent {} items to quickfix", count);
+        }
+
         _ => {}
     }
+}
+
+/// Save visual range and exit visual mode.
+fn save_and_exit_visual(app: &mut App) {
+    if let Some(anchor) = app.visual_anchor {
+        let start = anchor.min(app.selected_index);
+        let end = anchor.max(app.selected_index);
+        app.last_visual_range = Some((start, end));
+    }
+    app.exit_visual_mode();
 }

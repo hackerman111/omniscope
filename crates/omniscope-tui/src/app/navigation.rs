@@ -94,6 +94,8 @@ impl App {
     // ─── Phase 1: Jump List ────────────────────────────────
 
     pub fn record_jump(&mut self) {
+        // Save current position for '' mark
+        self.last_jump_pos = Some(self.selected_index);
         if let Some(book) = self.selected_book() {
             self.jump_list.push(self.selected_index, book.id.to_string());
         }

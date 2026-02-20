@@ -11,15 +11,29 @@ mod z_commands;
 pub mod find_char;
 pub mod easy_motion;
 pub mod hints;
+pub mod macro_recorder;
 #[cfg(test)]
 mod tests;
 
 use crossterm::event::{KeyCode, KeyModifiers};
-use crate::app::{App, Mode};
+use crate::app::{App, Mode, SearchDirection};
 use crate::popup::Popup;
 use crate::keys::operator::Operator;
 
 pub(crate) fn handle_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
+    // Record macro events (before any handling, except for the 'q' that stops recording)
+    if app.macro_recorder.is_recording() {
+        // Don't record the 'q' that stops recording
+        let is_stop_recording = code == KeyCode::Char('q')
+            && !modifiers.contains(KeyModifiers::CONTROL)
+            && app.mode == Mode::Normal
+            && app.popup.is_none()
+            && app.pending_key.is_none();
+        if !is_stop_recording {
+            app.macro_recorder.record_key(code, modifiers);
+        }
+    }
+
     // Popup takes priority
     if app.popup.is_some() {
         popup_keys::handle_popup_key(app, code, modifiers);
@@ -55,67 +69,125 @@ fn handle_normal_mode(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
     // ── Digit accumulation (vim count prefix) ─────────────────────────
     if let KeyCode::Char(c) = code {
         if c.is_ascii_digit() && c != '0' {
-            app.push_vim_digit(c.to_digit(10).unwrap());
+            let d = c.to_digit(10).unwrap();
+            let new_count = app.vim_count.saturating_mul(10).saturating_add(d);
+            if new_count <= 9999 {
+                app.push_vim_digit(d);
+            }
             return;
         }
         if c == '0' && app.vim_count > 0 {
-             app.push_vim_digit(0);
+             let new_count = app.vim_count.saturating_mul(10);
+             if new_count <= 9999 {
+                 app.push_vim_digit(0);
+             }
              return;
         }
     }
 
-    // ── Handle pending key sequences (g, z, m, ') ─────────────────────
+    // ── Handle pending key sequences (g, z, m, ', [, ], Space, S, f/F/t/T, @) ──
     if let Some(pending) = app.pending_key {
         handle_pending_sequence(app, pending, code);
         return;
     }
 
     match code {
-        // ─── Quit / Quickfix ───────────────────────────────────────
-        KeyCode::Char('q') => {
-            if modifiers.contains(KeyModifiers::CONTROL) {
-                 app.reset_vim_count();
-                 if !app.visual_selections.is_empty() {
-                     app.quickfix_list = app.visual_selections.iter()
-                        .filter_map(|&i| app.books.get(i).cloned())
-                        .collect();
-                 } else {
-                     app.quickfix_list = app.books.clone();
-                 }
-                 app.quickfix_show = true;
-                 app.quickfix_selected = 0;
-                 app.exit_visual_mode();
-                 app.status_message = format!("Sent {} items to quickfix", app.quickfix_list.len());
+        // ─── Macro Recording ──────────────────────────────────────
+        KeyCode::Char('q') if !modifiers.contains(KeyModifiers::CONTROL) => {
+            if app.macro_recorder.is_recording() {
+                app.macro_recorder.stop_recording();
+                app.status_message = "Macro recording stopped".to_string();
             } else {
-                app.should_quit = true;
+                // Start recording: next char is register
+                app.pending_key = Some('Q'); // Use 'Q' to distinguish from regular 'q' quit
             }
+        }
+
+        // ─── Macro Replay ─────────────────────────────────────────
+        KeyCode::Char('@') => {
+            app.pending_key = Some('@');
+        }
+
+        // ─── Quit / Quickfix ───────────────────────────────────────
+        KeyCode::Char('Q') => {
+            app.should_quit = true;
+        }
+
+        // ─── Ctrl+q — quickfix from visual/search ──────────────────
+        KeyCode::Char('q') if modifiers.contains(KeyModifiers::CONTROL) => {
+             app.reset_vim_count();
+             if !app.visual_selections.is_empty() {
+                 app.quickfix_list = app.visual_selections.iter()
+                    .filter_map(|&i| app.books.get(i).cloned())
+                    .collect();
+             } else {
+                 app.quickfix_list = app.books.clone();
+             }
+             app.quickfix_show = true;
+             app.quickfix_selected = 0;
+             app.exit_visual_mode();
+             app.status_message = format!("Sent {} items to quickfix", app.quickfix_list.len());
         }
 
         // ─── Visual Mode Entry ─────────────────────────────────────
         KeyCode::Char('v') if modifiers.contains(KeyModifiers::CONTROL) => {
             app.enter_visual_mode(Mode::VisualBlock);
         }
+        KeyCode::Char('V') => {
+            app.enter_visual_mode(Mode::VisualLine);
+        }
         KeyCode::Char('v') => {
             app.enter_visual_mode(Mode::Visual);
         }
+
+        // ─── Search ─────────────────────────────────────────────────
         KeyCode::Char('/') => {
-            app.open_telescope(); // / enters search via telescope popup
+            app.reset_vim_count();
+            app.mode = Mode::Search;
+            app.search_input.clear();
+            app.search_direction = SearchDirection::Forward;
+        }
+        KeyCode::Char('Z') => {
+            app.reset_vim_count();
+            app.open_telescope();
         }
         KeyCode::Char('?') => {
-            app.open_telescope(); // ? could be reverse search, but mapped to telescope for now
+            app.reset_vim_count();
+            app.mode = Mode::Search;
+            app.search_input.clear();
+            app.search_direction = SearchDirection::Backward;
         }
+
+        // ─── Search Next/Prev ───────────────────────────────────────
         KeyCode::Char('n') => {
-            // Jump to next match of last search.
-            // Since Telescope does filtering and updates `app.books`,
-            // "next match" in a filtered list just means moving down, but if we aren't filtering,
-            // we'd need a real "search forward" logic.
-            // For now, if we have a search query, applying it filters the list. So 'n' usually
-            // just means "go down" in the filtered list.
-            // A true vim search would jump the cursor matching a regex in the unfiltered list.
-            app.status_message = "Search next ('n') requires full regex search buffer implementation.".to_string();
+            search_next(app, false);
         }
         KeyCode::Char('N') => {
-            app.status_message = "Search prev ('N') requires full regex search buffer implementation.".to_string();
+            search_next(app, true);
+        }
+
+        // ─── Word-under-cursor Search ───────────────────────────────
+        KeyCode::Char('*') => {
+            // Search for current book's author (forward)
+            if let Some(book) = app.selected_book() {
+                let query = book.authors.first()
+                    .cloned()
+                    .unwrap_or_else(|| book.title.clone());
+                app.last_search = Some(query.clone());
+                app.search_direction = SearchDirection::Forward;
+                search_next(app, false);
+            }
+        }
+        KeyCode::Char('#') => {
+            // Search for current book's author (backward)
+            if let Some(book) = app.selected_book() {
+                let query = book.authors.first()
+                    .cloned()
+                    .unwrap_or_else(|| book.title.clone());
+                app.last_search = Some(query.clone());
+                app.search_direction = SearchDirection::Backward;
+                search_next(app, false);
+            }
         }
 
         // ─── Navigation ─────────────────────────────────────────────
@@ -146,10 +218,9 @@ fn handle_normal_mode(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
 
         // ─── Complex Motions (G, gg, 0, $) ──────────────────────────
         KeyCode::Char('G') => {
-            app.record_jump(); // Push current pos to jump list before moving
-            let n = app.count_or_one(); 
-            // ...
-            if let Some(t) = motions::get_nav_target(app, 'G', n) {
+            app.record_jump();
+            let count = app.count_or_one();
+            if let Some(t) = motions::get_nav_target(app, 'G', count) {
                  app.selected_index = t;
             }
             app.reset_vim_count();
@@ -170,19 +241,23 @@ fn handle_normal_mode(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         // ─── Screen Motions (H, M, L) ──────────────────────────────
         KeyCode::Char('H') => {
             app.reset_vim_count();
-            app.move_to_top();
+            // Top of visible area
+            app.selected_index = app.viewport_offset;
+            if app.selected_index >= app.books.len() {
+                app.selected_index = 0;
+            }
         }
         KeyCode::Char('M') => {
             app.reset_vim_count();
-            // Middle: approximate
-            let mid = app.books.len() / 2;
-            if mid < app.books.len() {
-                app.selected_index = mid;
-            }
+            let visible_height = 20_usize;
+            let mid = app.viewport_offset + visible_height / 2;
+            app.selected_index = mid.min(app.books.len().saturating_sub(1));
         }
         KeyCode::Char('L') => {
             app.reset_vim_count();
-            app.move_to_bottom();
+            let visible_height = 20_usize;
+            let bottom = app.viewport_offset + visible_height.saturating_sub(1);
+            app.selected_index = bottom.min(app.books.len().saturating_sub(1));
         }
 
         // ─── Hierarchy ──────────────────────────────────────────────
@@ -220,38 +295,7 @@ fn handle_normal_mode(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         KeyCode::Char(']') => { app.pending_key = Some(']'); }
         KeyCode::Char(' ') => { app.pending_key = Some(' '); }
 
-        // ─── Operators ──────────────────────────────────────────────
-        KeyCode::Char('d') if !modifiers.contains(KeyModifiers::CONTROL) => {
-             app.pending_operator = Some(Operator::Delete);
-             app.mode = Mode::Pending;
-             // We do NOT use Pending mode for `dd`, we used to check it here,
-             // but `Mode::Pending` will handle the next key.
-        }
-        KeyCode::Char('y') => {
-             app.pending_operator = Some(Operator::Yank);
-             app.mode = Mode::Pending;
-        }
-        KeyCode::Char('c') => {
-             app.pending_operator = Some(Operator::Change);
-             app.mode = Mode::Pending;
-        }
-        KeyCode::Char('>') => {
-             app.pending_operator = Some(Operator::AddTag); // Or Indent
-             app.mode = Mode::Pending;
-        }
-        KeyCode::Char('<') => {
-             app.pending_operator = Some(Operator::RemoveTag); // or Outdent
-             app.mode = Mode::Pending;
-        }
-        
-        KeyCode::Char('p') => {
-             app.reset_vim_count();
-             app.paste_from_register();
-        }
-        
-        KeyCode::Char('"') => { app.pending_register_select = true; }
-
-        // ─── Half-page scroll ───────────────────────────────────────
+        // ─── Scroll (Ctrl variants MUST precede plain char matches) ──
         KeyCode::Char('d') if modifiers.contains(KeyModifiers::CONTROL) => {
             let n = 10 * app.count_or_one();
             app.reset_vim_count();
@@ -262,6 +306,59 @@ fn handle_normal_mode(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             app.reset_vim_count();
             app.move_up_n(n);
         }
+        KeyCode::Char('f') if modifiers.contains(KeyModifiers::CONTROL) => {
+            let n = 20 * app.count_or_one();
+            app.reset_vim_count();
+            app.move_down_n(n);
+        }
+        KeyCode::Char('b') if modifiers.contains(KeyModifiers::CONTROL) => {
+            let n = 20 * app.count_or_one();
+            app.reset_vim_count();
+            app.move_up_n(n);
+        }
+        KeyCode::Char('e') if modifiers.contains(KeyModifiers::CONTROL) => {
+            let n = app.count_or_one();
+            app.reset_vim_count();
+            app.viewport_offset = app.viewport_offset.saturating_add(n);
+            let max_offset = app.books.len().saturating_sub(1);
+            if app.viewport_offset > max_offset {
+                app.viewport_offset = max_offset;
+            }
+        }
+        KeyCode::Char('y') if modifiers.contains(KeyModifiers::CONTROL) => {
+            let n = app.count_or_one();
+            app.reset_vim_count();
+            app.viewport_offset = app.viewport_offset.saturating_sub(n);
+        }
+
+        // ─── Operators ──────────────────────────────────────────────
+        KeyCode::Char('d') if !modifiers.contains(KeyModifiers::CONTROL) => {
+             app.pending_operator = Some(Operator::Delete);
+             app.mode = Mode::Pending;
+        }
+        KeyCode::Char('y') if !modifiers.contains(KeyModifiers::CONTROL) => {
+             app.pending_operator = Some(Operator::Yank);
+             app.mode = Mode::Pending;
+        }
+        KeyCode::Char('c') => {
+             app.pending_operator = Some(Operator::Change);
+             app.mode = Mode::Pending;
+        }
+        KeyCode::Char('>') => {
+             app.pending_operator = Some(Operator::AddTag);
+             app.mode = Mode::Pending;
+        }
+        KeyCode::Char('<') => {
+             app.pending_operator = Some(Operator::RemoveTag);
+             app.mode = Mode::Pending;
+        }
+        
+        KeyCode::Char('p') => {
+             app.reset_vim_count();
+             app.paste_from_register();
+        }
+        
+        KeyCode::Char('"') => { app.pending_register_select = true; }
 
         // ─── Undo / Redo ────────────────────────────────────────────
         KeyCode::Char('u') if !modifiers.contains(KeyModifiers::CONTROL) => {
@@ -274,9 +371,11 @@ fn handle_normal_mode(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         }
 
         // ─── Find Character Motions ────────────────────────────────
-        KeyCode::Char('f') | KeyCode::Char('F') | KeyCode::Char('t') | KeyCode::Char('T') => {
+        KeyCode::Char('f') | KeyCode::Char('F') | KeyCode::Char('t') | KeyCode::Char('T')
+            if !modifiers.contains(KeyModifiers::CONTROL) =>
+        {
              if let KeyCode::Char(c) = code {
-                 app.pending_key = Some(c);
+                  app.pending_key = Some(c);
              }
         }
         KeyCode::Char(';') => {
@@ -302,8 +401,12 @@ fn handle_normal_mode(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         }
 
         // ─── Book Operations ────────────────────────────────────────
-        KeyCode::Char('a') => { app.reset_vim_count(); app.open_add_popup(); }
-        KeyCode::Char('o') => { app.reset_vim_count(); app.open_selected_book(); }
+        KeyCode::Char('a') if !modifiers.contains(KeyModifiers::CONTROL) => {
+            app.reset_vim_count(); app.open_add_popup();
+        }
+        KeyCode::Char('o') if !modifiers.contains(KeyModifiers::CONTROL) => {
+            app.reset_vim_count(); app.open_selected_book();
+        }
         KeyCode::Char('R') => {
             app.reset_vim_count();
             app.popup = Some(Popup::SetRating {
@@ -319,7 +422,6 @@ fn handle_normal_mode(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
 
         // ─── Modes & Search ─────────────────────────────────────────
         KeyCode::Char('i') if !modifiers.contains(KeyModifiers::CONTROL) => {
-             // Basic "insert" mode in this TUI currently maps to opening the add/edit form
              app.reset_vim_count();
              app.open_add_popup();
              app.status_message = "-- INSERT --".to_string();
@@ -328,6 +430,7 @@ fn handle_normal_mode(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
             app.reset_vim_count();
             app.mode = Mode::Command;
             app.command_input.clear();
+            app.command_history_idx = None;
         }
 
         // ─── Misc ───────────────────────────────────────────────────
@@ -355,7 +458,39 @@ fn handle_pending_sequence(app: &mut App, pending: char, code: KeyCode) {
         }
         // '<char> — jump to mark
         ('\'', KeyCode::Char(c)) if c.is_ascii_alphabetic() => {
+            app.record_jump();
             app.jump_to_mark(c);
+        }
+        // '' — jump to last position before jump
+        ('\'', KeyCode::Char('\'')) => {
+            if let Some(last_pos) = app.last_jump_pos {
+                let current = app.selected_index;
+                app.last_jump_pos = Some(current);
+                if last_pos < app.books.len() {
+                    app.selected_index = last_pos;
+                    app.status_message = format!("Jumped to last position: {}", last_pos + 1);
+                }
+            } else {
+                app.status_message = "No previous jump position".to_string();
+            }
+        }
+        // '< — jump to start of last visual selection
+        ('\'', KeyCode::Char('<')) => {
+            if let Some((start, _)) = app.last_visual_range {
+                if start < app.books.len() {
+                    app.selected_index = start;
+                    app.status_message = format!("Jump to '< ({})", start + 1);
+                }
+            }
+        }
+        // '> — jump to end of last visual selection  
+        ('\'', KeyCode::Char('>')) => {
+            if let Some((_, end)) = app.last_visual_range {
+                if end < app.books.len() {
+                    app.selected_index = end;
+                    app.status_message = format!("Jump to '> ({})", end + 1);
+                }
+            }
         }
         // [[ or ]]
         ('[', KeyCode::Char('[')) => {
@@ -377,8 +512,100 @@ fn handle_pending_sequence(app: &mut App, pending: char, code: KeyCode) {
                 app.last_find_char = Some((target_char, motion));
             }
         }
+        // Q<char> - start macro recording (our internal mapping for 'q')
+        ('Q', KeyCode::Char(c)) if c.is_ascii_lowercase() => {
+            app.macro_recorder.start_recording(c);
+            app.status_message = format!("Recording @{c}...");
+        }
+        ('Q', _) => {
+            app.status_message = "Invalid register for macro (use a-z)".to_string();
+        }
+        // @<char> - replay macro
+        ('@', KeyCode::Char('@')) => {
+            // @@ — replay last macro
+            if let Some(last) = app.macro_recorder.last_played {
+                let count = app.count_or_one();
+                app.reset_vim_count();
+                replay_macro(app, last, count);
+            } else {
+                app.status_message = "No last macro to replay".to_string();
+            }
+        }
+        ('@', KeyCode::Char(c)) if c.is_ascii_lowercase() => {
+            let count = app.count_or_one();
+            app.reset_vim_count();
+            replay_macro(app, c, count);
+        }
+        ('@', _) => {
+            app.status_message = "Invalid register for macro replay".to_string();
+        }
         _ => {}
     }
+}
+
+/// Replay a macro `count` times.
+fn replay_macro(app: &mut App, reg: char, count: usize) {
+    if let Some(keys) = app.macro_recorder.get_macro(reg).cloned() {
+        app.macro_recorder.last_played = Some(reg);
+        for _ in 0..count {
+            for (code, mods) in &keys {
+                handle_key(app, *code, *mods);
+            }
+        }
+        app.status_message = format!("Replayed @{reg} ×{count}");
+    } else {
+        app.status_message = format!("Macro @{reg} is empty");
+    }
+}
+
+/// Search for the next/previous match of `last_search`.
+fn search_next(app: &mut App, reverse: bool) {
+    let query = match app.last_search.clone() {
+        Some(q) if !q.is_empty() => q,
+        _ => {
+            app.status_message = "No previous search".to_string();
+            return;
+        }
+    };
+
+    let query_lower = query.to_lowercase();
+    let len = app.books.len();
+    if len == 0 { return; }
+
+    let forward = match (app.search_direction, reverse) {
+        (SearchDirection::Forward, false) | (SearchDirection::Backward, true) => true,
+        (SearchDirection::Forward, true) | (SearchDirection::Backward, false) => false,
+    };
+
+    let start = app.selected_index;
+    
+    if forward {
+        // Search forward from current+1, wrapping around
+        for offset in 1..=len {
+            let idx = (start + offset) % len;
+            let book = &app.books[idx];
+            let haystack = format!("{} {}", book.title, book.authors.join(" ")).to_lowercase();
+            if haystack.contains(&query_lower) {
+                app.selected_index = idx;
+                app.status_message = format!("/{query} [{}/{}]", idx + 1, len);
+                return;
+            }
+        }
+    } else {
+        // Search backward
+        for offset in 1..=len {
+            let idx = (start + len - offset) % len;
+            let book = &app.books[idx];
+            let haystack = format!("{} {}", book.title, book.authors.join(" ")).to_lowercase();
+            if haystack.contains(&query_lower) {
+                app.selected_index = idx;
+                app.status_message = format!("?{query} [{}/{}]", idx + 1, len);
+                return;
+            }
+        }
+    }
+
+    app.status_message = format!("Pattern not found: {query}");
 }
 
 fn handle_sort_command(app: &mut App, code: KeyCode) {
@@ -415,7 +642,6 @@ fn handle_sort_command(app: &mut App, code: KeyCode) {
             app.status_message = "Sort: Updated (Default)".to_string();
         }
         _ => {
-             // Invalid key or ESC cancels
              if code == KeyCode::Esc {
                  app.status_message.clear();
              } else {
@@ -430,10 +656,15 @@ fn handle_command_mode(app: &mut App, code: KeyCode) {
         KeyCode::Esc => {
             app.mode = Mode::Normal;
             app.command_input.clear();
+            app.command_history_idx = None;
         }
         KeyCode::Enter => {
             let cmd = app.command_input.clone();
             app.mode = Mode::Normal;
+            if !cmd.is_empty() {
+                app.command_history.push(cmd.clone());
+            }
+            app.command_history_idx = None;
             execute_command(app, &cmd);
             app.command_input.clear();
         }
@@ -443,8 +674,32 @@ fn handle_command_mode(app: &mut App, code: KeyCode) {
                 app.mode = Mode::Normal;
             }
         }
+        KeyCode::Up => {
+            // Navigate command history backward
+            if app.command_history.is_empty() { return; }
+            let idx = match app.command_history_idx {
+                None => app.command_history.len().saturating_sub(1),
+                Some(i) => i.saturating_sub(1),
+            };
+            app.command_history_idx = Some(idx);
+            if let Some(cmd) = app.command_history.get(idx) {
+                app.command_input = cmd.clone();
+            }
+        }
+        KeyCode::Down => {
+            if let Some(idx) = app.command_history_idx {
+                if idx + 1 < app.command_history.len() {
+                    app.command_history_idx = Some(idx + 1);
+                    app.command_input = app.command_history[idx + 1].clone();
+                } else {
+                    app.command_history_idx = None;
+                    app.command_input.clear();
+                }
+            }
+        }
         KeyCode::Char(c) => {
             app.command_input.push(c);
+            app.command_history_idx = None;
         }
         _ => {}
     }
@@ -459,6 +714,10 @@ fn handle_search_mode(app: &mut App, code: KeyCode) {
         }
         KeyCode::Enter => {
             app.mode = Mode::Normal;
+            // Save search for n/N
+            if !app.search_input.is_empty() {
+                app.last_search = Some(app.search_input.clone());
+            }
             // Keep results shown, clear input
             if app.search_input.is_empty() {
                 app.apply_filter();
@@ -509,7 +768,6 @@ fn execute_command(app: &mut App, cmd: &str) {
         }
         CommandAction::Global { pattern, command } => {
             if let Ok(re) = regex::Regex::new(&pattern) {
-                // Find matching books
                 let mut matched_indices = Vec::new();
                 for (i, book) in app.books.iter().enumerate() {
                      let search_text = format!("{} {} {}", book.title, book.authors.join(" "), book.tags.join(" "));
@@ -521,14 +779,11 @@ fn execute_command(app: &mut App, cmd: &str) {
                 if matched_indices.is_empty() {
                      app.status_message = format!("No matches for pattern: {pattern}");
                 } else {
-                     // For now, support simple commands like 'd' (delete) or 'tag foo'
-                     // A real implementation might feed `command` recursively to parse_command
                      if command == "d" {
                           app.delete_indices(&matched_indices);
                           app.status_message = format!("Global delete executed on {} items", matched_indices.len());
                      } else if command.starts_with("tag ") {
                           let tag = command.trim_start_matches("tag ").trim();
-                          // Load all cards, add tag, save
                           let mut cards = Vec::new();
                           let cards_dir = app.config.cards_dir();
                           for &idx in &matched_indices {
@@ -565,8 +820,6 @@ fn execute_command(app: &mut App, cmd: &str) {
             }
         }
         CommandAction::Substitute { pattern, replacement, global } => {
-             // Basic implementation placeholder for %s/foo/bar/g
-             // Full renaming logic requires loading all cards, regex replace title/tags, and saving.
              app.status_message = format!("Substitute `{pattern}` -> `{replacement}` (global: {global}) not yet fully implemented");
         }
         CommandAction::UndoList => {
@@ -614,8 +867,97 @@ fn execute_command(app: &mut App, cmd: &str) {
             app.status_message = format!("Undid {} changes (back {})", count, time_str);
         }
         CommandAction::Later(time_str) => {
-            // For later, we just redo
             app.status_message = format!(":later {time_str} is WIP. Use Ctrl+r to redo.");
+        }
+        CommandAction::Sort(field) => {
+            use crate::app::SortKey;
+            let key = match field.as_str() {
+                "title" => SortKey::TitleAsc,
+                "year" | "year_desc" => SortKey::YearDesc,
+                "year_asc" => SortKey::YearAsc,
+                "rating" => SortKey::RatingDesc,
+                "frecency" => SortKey::FrecencyDesc,
+                "updated" => SortKey::UpdatedDesc,
+                _ => {
+                    app.status_message = format!("Unknown sort field: {field}");
+                    return;
+                }
+            };
+            app.sort_key = key;
+            app.apply_sort();
+            app.status_message = format!("Sort: {}", key.label());
+        }
+        CommandAction::Library(name) => {
+            app.sidebar_filter = crate::app::SidebarFilter::Library(name.clone());
+            app.refresh_books();
+            app.status_message = format!("Library: {name}");
+        }
+        CommandAction::FilterTag(tag) => {
+            app.sidebar_filter = crate::app::SidebarFilter::Tag(tag.clone());
+            app.refresh_books();
+            app.status_message = format!("Tag filter: {tag}");
+        }
+        CommandAction::Marks => {
+            let marks_display: Vec<String> = app.marks.iter()
+                .map(|(&k, &v)| format!("'{k} -> {}", v + 1))
+                .collect();
+            if marks_display.is_empty() {
+                app.status_message = "No marks set".to_string();
+            } else {
+                app.status_message = format!("Marks: {}", marks_display.join(" | "));
+            }
+        }
+        CommandAction::Registers(reg) => {
+            if let Some(r) = reg {
+                if let Some(register) = app.registers.get(&r) {
+                    let desc = match &register.content {
+                        crate::app::RegisterContent::Card(c) => c.metadata.title.clone(),
+                        crate::app::RegisterContent::MultipleCards(cards) => format!("{} cards", cards.len()),
+                        crate::app::RegisterContent::Text(t) => t.clone(),
+                        crate::app::RegisterContent::Path(p) => p.clone(),
+                    };
+                    app.status_message = format!("\"{r}: {desc}");
+                } else {
+                    app.status_message = format!("Register \"{r} is empty");
+                }
+            } else {
+                let regs: Vec<String> = app.registers.keys()
+                    .map(|k| format!("\"{k}"))
+                    .collect();
+                if regs.is_empty() {
+                    app.status_message = "No registers".to_string();
+                } else {
+                    app.status_message = format!("Registers: {}", regs.join(" "));
+                }
+            }
+        }
+        CommandAction::DeleteMarks(marks_str) => {
+            for c in marks_str.chars() {
+                app.marks.remove(&c);
+            }
+            app.status_message = format!("Deleted marks: {marks_str}");
+        }
+        CommandAction::Macros => {
+            let list = app.macro_recorder.list_macros();
+            if list.is_empty() {
+                app.status_message = "No macros recorded".to_string();
+            } else {
+                let desc: Vec<String> = list.iter()
+                    .map(|(reg, len)| format!("@{reg} ({len} keys)"))
+                    .collect();
+                app.status_message = format!("Macros: {}", desc.join(" | "));
+            }
+        }
+        CommandAction::Doctor => {
+            let book_count = app.books.len();
+            let all_count = app.all_books.len();
+            let undo_count = app.undo_stack.len();
+            let marks_count = app.marks.len();
+            let reg_count = app.registers.len();
+            let macro_count = app.macro_recorder.list_macros().len();
+            app.status_message = format!(
+                "Doctor: books={book_count}/{all_count} undo={undo_count} marks={marks_count} regs={reg_count} macros={macro_count}"
+            );
         }
         CommandAction::Unknown(unknown_cmd) => {
             app.status_message = format!("Unknown command: {unknown_cmd}");

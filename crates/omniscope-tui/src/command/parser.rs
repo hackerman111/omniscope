@@ -26,6 +26,14 @@ pub enum CommandAction {
     QuickfixDo(String),
     QuickfixNext,
     QuickfixPrev,
+    Sort(String),
+    Library(String),
+    FilterTag(String),
+    Marks,
+    Registers(Option<char>),
+    DeleteMarks(String),
+    Doctor,
+    Macros,
     Unknown(String),
 }
 
@@ -37,7 +45,7 @@ pub fn parse_command(cmd: &str) -> CommandAction {
     }
 
     match parts.as_slice() {
-        ["q"] | ["quit"] => CommandAction::Quit,
+        ["q"] | ["quit"] | ["qa"] | ["q!"] => CommandAction::Quit,
         ["w"] | ["write"] => CommandAction::Write,
         ["wq"] => CommandAction::WriteQuit,
         ["add"] => CommandAction::Add,
@@ -56,12 +64,30 @@ pub fn parse_command(cmd: &str) -> CommandAction {
         ["cnext"] | ["cn"] => CommandAction::QuickfixNext,
         ["cprev"] | ["cp"] => CommandAction::QuickfixPrev,
         ["cdo", rest @ ..] => CommandAction::QuickfixDo(rest.join(" ")),
+        // New commands
+        ["sort", field, ..] => CommandAction::Sort(field.to_string()),
+        ["lib" | "library", name, ..] => CommandAction::Library(name.to_string()),
+        ["tag", name, ..] => CommandAction::FilterTag(name.to_string()),
+        ["marks"] => CommandAction::Marks,
+        ["reg" | "registers"] => CommandAction::Registers(None),
+        ["reg" | "registers", r] => {
+            let ch = r.chars().next();
+            CommandAction::Registers(ch)
+        }
+        ["delmarks", marks] => CommandAction::DeleteMarks(marks.to_string()),
+        ["doctor"] => CommandAction::Doctor,
+        ["macros"] => CommandAction::Macros,
+        ["tabnew", ..] => {
+            // Tabs not implemented yet, but parse gracefully
+            CommandAction::Unknown("tabnew (tabs not implemented)".to_string())
+        }
+        ["bnext" | "bn"] => CommandAction::Unknown("bnext (buffers not implemented)".to_string()),
+        ["bprev" | "bp"] => CommandAction::Unknown("bprev (buffers not implemented)".to_string()),
         _ => {
             let cmd_str = parts.join(" ");
             
             // Check for :g/pattern/command
             if cmd_str.starts_with("g/") || cmd_str.starts_with("v/") {
-                // simple parsing: g/pattern/command
                 let parts: Vec<&str> = cmd_str.splitn(3, '/').collect();
                 if parts.len() >= 3 {
                     let pattern = parts[1].to_string();
@@ -73,7 +99,7 @@ pub fn parse_command(cmd: &str) -> CommandAction {
             // Check for :%s/foo/bar/ or :s/foo/bar/g
             if cmd_str.starts_with("%s/") || cmd_str.starts_with("s/") {
                  let parts: Vec<&str> = cmd_str.split('/').collect();
-                 if parts.len() >= 3 { // %s, pattern, replacement, [flags]
+                 if parts.len() >= 3 {
                      let pattern = parts[1].to_string();
                      let replacement = parts[2].to_string();
                      let global = parts.get(3).map_or(false, |&f| f.contains('g'));
@@ -82,6 +108,70 @@ pub fn parse_command(cmd: &str) -> CommandAction {
             }
             
             CommandAction::Unknown(cmd.to_string())
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_basic_commands() {
+        assert_eq!(parse_command("q"), CommandAction::Quit);
+        assert_eq!(parse_command("quit"), CommandAction::Quit);
+        assert_eq!(parse_command("q!"), CommandAction::Quit);
+        assert_eq!(parse_command("qa"), CommandAction::Quit);
+        assert_eq!(parse_command("w"), CommandAction::Write);
+        assert_eq!(parse_command("wq"), CommandAction::WriteQuit);
+    }
+
+    #[test]
+    fn test_sort_command() {
+        assert_eq!(parse_command("sort title"), CommandAction::Sort("title".to_string()));
+        assert_eq!(parse_command("sort year"), CommandAction::Sort("year".to_string()));
+    }
+
+    #[test]
+    fn test_library_command() {
+        assert_eq!(parse_command("lib fiction"), CommandAction::Library("fiction".to_string()));
+    }
+
+    #[test]
+    fn test_marks_registers() {
+        assert_eq!(parse_command("marks"), CommandAction::Marks);
+        assert_eq!(parse_command("reg"), CommandAction::Registers(None));
+        assert_eq!(parse_command("reg a"), CommandAction::Registers(Some('a')));
+        assert_eq!(parse_command("delmarks abc"), CommandAction::DeleteMarks("abc".to_string()));
+    }
+
+    #[test]
+    fn test_doctor() {
+        assert_eq!(parse_command("doctor"), CommandAction::Doctor);
+    }
+
+    #[test]
+    fn test_macros() {
+        assert_eq!(parse_command("macros"), CommandAction::Macros);
+    }
+
+    #[test]
+    fn test_global_command() {
+        assert_eq!(
+            parse_command("g/rust/d"),
+            CommandAction::Global { pattern: "rust".to_string(), command: "d".to_string() }
+        );
+    }
+
+    #[test]
+    fn test_substitute() {
+        match parse_command("s/foo/bar/g") {
+            CommandAction::Substitute { pattern, replacement, global } => {
+                assert_eq!(pattern, "foo");
+                assert_eq!(replacement, "bar");
+                assert!(global);
+            }
+            other => panic!("Expected Substitute, got {:?}", other),
         }
     }
 }

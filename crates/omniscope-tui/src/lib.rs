@@ -2,8 +2,9 @@ pub mod app;
 pub mod event;
 pub mod popup;
 pub mod ui;
-pub mod keys; // New module
+pub mod keys;
 pub mod command;
+pub mod theme;
 
 use std::io;
 use std::time::Duration;

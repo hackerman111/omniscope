@@ -391,6 +391,13 @@ pub(crate) fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModif
             }
         }
 
+        Some(Popup::Marks) | Some(Popup::Registers) => match code {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                app.popup = None;
+            }
+            _ => {}
+        },
+
         None => {}
     }
 }

@@ -19,6 +19,10 @@ pub enum Popup {
     Help,
     /// EasyMotion overlay.
     EasyMotion(EasyMotionState),
+    /// Selection of marks.
+    Marks,
+    /// Selection of registers.
+    Registers,
 }
 
 /// Telescope internal mode (vim-like).

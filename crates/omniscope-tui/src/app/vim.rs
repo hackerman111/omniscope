@@ -178,7 +178,7 @@ impl App {
                   text_to_yank.push_str(&card.metadata.title);
                   text_to_yank.push('\n');
              }
-             if let Ok(mut clipboard) = arboard::Clipboard::new() {
+             if let Some(ref mut clipboard) = self.clipboard {
                   let _ = clipboard.set_text(text_to_yank.trim());
              }
         }
@@ -195,7 +195,7 @@ impl App {
 
         // Try to pull from system clipboard if pasting from + or *
         if reg_char == '+' || reg_char == '*' {
-             if let Ok(mut clipboard) = arboard::Clipboard::new() {
+             if let Some(ref mut clipboard) = self.clipboard {
                   if let Ok(text) = clipboard.get_text() {
                        text_from_clip = Some(text);
                   }

@@ -1,5 +1,7 @@
-mod panels;
-mod popups;
+pub(crate) mod panels;
+pub(crate) mod popups;
+pub(crate) mod layout;
+pub(crate) mod overlays;
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -9,57 +11,42 @@ use ratatui::Frame;
 
 use crate::app::{App, Mode};
 
-/// Color palette — Catppuccin Mocha inspired defaults.
-pub(crate) mod colors {
-    use ratatui::style::Color;
-
-    pub const BASE: Color = Color::Rgb(30, 30, 46);
-    pub const SURFACE0: Color = Color::Rgb(49, 50, 68);
-    pub const SURFACE1: Color = Color::Rgb(69, 71, 90);
-    pub const TEXT: Color = Color::Rgb(205, 214, 244);
-    pub const SUBTEXT0: Color = Color::Rgb(166, 173, 200);
-    pub const LAVENDER: Color = Color::Rgb(180, 190, 254);
-    pub const BLUE: Color = Color::Rgb(137, 180, 250);
-    pub const GREEN: Color = Color::Rgb(166, 227, 161);
-    pub const YELLOW: Color = Color::Rgb(249, 226, 175);
-    pub const PEACH: Color = Color::Rgb(250, 179, 135);
-    pub const RED: Color = Color::Rgb(243, 139, 168);
-    pub const MAUVE: Color = Color::Rgb(203, 166, 247);
-}
+// Removed colors module, using app.theme instead
 
 /// Render the entire UI.
 pub fn render(frame: &mut Frame, app: &App) {
     let size = frame.area();
 
-    // Main vertical layout: header + body + status bar
+    // Main vertical layout: body + status bar + command line
+    let show_cmdline = app.mode == Mode::Command || app.mode == Mode::Search;
+    let main_constraints = if show_cmdline {
+        vec![
+            Constraint::Min(3),    // body
+            Constraint::Length(1), // status bar
+            Constraint::Length(1), // command line
+        ]
+    } else {
+        vec![
+            Constraint::Min(3),    // body
+            Constraint::Length(1), // status bar
+        ]
+    };
+
     let main_layout = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1), // header
-            Constraint::Min(3),   // body
-            Constraint::Length(1), // status bar
-        ])
+        .constraints(main_constraints)
         .split(size);
 
-    render_header(frame, app, main_layout[0]);
-    if app.quickfix_show {
-        let body_and_qf = Layout::default()
-            .direction(Direction::Vertical)
-            .constraints([
-                Constraint::Min(3),
-                Constraint::Length(10.min(main_layout[1].height / 3)), // up to 1/3 of screen
-            ])
-            .split(main_layout[1]);
-        panels::render_body(frame, app, body_and_qf[0]);
-        panels::render_quickfix(frame, app, body_and_qf[1]);
-    } else {
-        panels::render_body(frame, app, main_layout[1]);
+    panels::render_body(frame, app, main_layout[0]);
+    panels::statusbar::render(frame, app, main_layout[1]);
+    
+    if show_cmdline {
+        panels::cmdline::render(frame, app, main_layout[2]);
     }
-    render_status_bar(frame, app, main_layout[2]);
 
     // Popup overlay (on top of everything)
     if let Some(ref popup) = app.popup {
-        popups::render_popup(frame, popup, size);
+        popups::render_popup(frame, app, popup, size);
     }
     
     // Key Hints overlay (contextual)
@@ -96,7 +83,7 @@ fn render_key_hints(frame: &mut Frame, app: &App, area: Rect) {
     
     let block = ratatui::widgets::Block::default()
         .borders(ratatui::widgets::Borders::TOP)
-        .style(Style::default().bg(colors::BASE));
+        .style(Style::default().bg(app.theme.bg()));
         
     let inner_area = block.inner(hint_area);
     frame.render_widget(block, hint_area);
@@ -105,104 +92,18 @@ fn render_key_hints(frame: &mut Frame, app: &App, area: Rect) {
     // Format: " k: desc  k: desc "
     let mut spans = Vec::new();
     for hint in hints {
-        spans.push(Span::styled(format!(" {} ", hint.key), Style::default().fg(colors::MAUVE).add_modifier(Modifier::BOLD)));
-        spans.push(Span::styled(format!("{}  ", hint.desc), Style::default().fg(colors::TEXT)));
+        spans.push(Span::styled(format!(" {} ", hint.key), Style::default().fg(app.theme.purple()).add_modifier(Modifier::BOLD)));
+        spans.push(Span::styled(format!("{}  ", hint.desc), Style::default().fg(app.theme.fg())));
     }
     
     let paragraph = Paragraph::new(Line::from(spans))
         .wrap(ratatui::widgets::Wrap { trim: true })
-        .style(Style::default().bg(colors::BASE));
+        .style(Style::default().bg(app.theme.bg()));
         
     frame.render_widget(paragraph, inner_area);
 }
 
-// ─── Header ────────────────────────────────────────────────
-
-fn render_header(frame: &mut Frame, app: &App, area: Rect) {
-    let mode_style = match app.mode {
-        Mode::Normal  => Style::default().fg(colors::BLUE).add_modifier(Modifier::BOLD),
-        Mode::Insert  => Style::default().fg(colors::GREEN).add_modifier(Modifier::BOLD),
-        Mode::Search  => Style::default().fg(colors::YELLOW).add_modifier(Modifier::BOLD),
-        Mode::Command => Style::default().fg(colors::PEACH).add_modifier(Modifier::BOLD),
-        Mode::Visual | Mode::VisualLine | Mode::VisualBlock => Style::default().fg(colors::MAUVE).add_modifier(Modifier::BOLD),
-        // Pending: orange — signals waiting for a second key (e.g. after 'd')
-        Mode::Pending => Style::default().fg(colors::PEACH).add_modifier(Modifier::BOLD),
-    };
-
-    let filter_text = match &app.sidebar_filter {
-        crate::app::SidebarFilter::All => "All books".to_string(),
-        crate::app::SidebarFilter::Library(name) => format!("📁 {name}"),
-        crate::app::SidebarFilter::Tag(name) => format!("#{name}"),
-    };
-
-    let header = Line::from(vec![
-        Span::styled(" 󰂺 omniscope ", Style::default().fg(colors::LAVENDER).add_modifier(Modifier::BOLD)),
-        Span::styled(format!("  {filter_text}  "), Style::default().fg(colors::SUBTEXT0)),
-        Span::raw(" ".repeat(area.width.saturating_sub(filter_text.len() as u16 + 30) as usize)),
-        Span::styled(format!(" {} ", app.mode), mode_style),
-    ]);
-
-    frame.render_widget(
-        Paragraph::new(header).style(Style::default().bg(colors::SURFACE0)),
-        area,
-    );
-}
-
-// ─── Status Bar ────────────────────────────────────────────
-
-fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
-    let content = match app.mode {
-        Mode::Command => {
-            Line::from(vec![
-                Span::styled(":", Style::default().fg(colors::PEACH)),
-                Span::styled(&app.command_input, Style::default().fg(colors::TEXT)),
-                Span::styled("█", Style::default().fg(colors::TEXT)),
-            ])
-        }
-        Mode::Search => {
-            Line::from(vec![
-                Span::styled("/", Style::default().fg(colors::YELLOW)),
-                Span::styled(&app.search_input, Style::default().fg(colors::TEXT)),
-                Span::styled("█", Style::default().fg(colors::TEXT)),
-            ])
-        }
-        _ => {
-            if app.status_message.is_empty() {
-                // Show count prefix if accumulating
-                let count_hint = if app.vim_count > 0 {
-                    format!(" {}…", app.vim_count)
-                } else {
-                    String::new()
-                };
-                Line::from(vec![
-                    Span::styled(count_hint, Style::default().fg(colors::YELLOW).add_modifier(Modifier::BOLD)),
-                    Span::styled(" ?", Style::default().fg(colors::SUBTEXT0)),
-                    Span::styled(":help  ", Style::default().fg(colors::SUBTEXT0).add_modifier(Modifier::DIM)),
-                    Span::styled("/", Style::default().fg(colors::SUBTEXT0)),
-                    Span::styled(":search  ", Style::default().fg(colors::SUBTEXT0).add_modifier(Modifier::DIM)),
-                    Span::styled("a", Style::default().fg(colors::SUBTEXT0)),
-                    Span::styled(":add  ", Style::default().fg(colors::SUBTEXT0).add_modifier(Modifier::DIM)),
-                    Span::styled("S", Style::default().fg(colors::SUBTEXT0)),
-                    Span::styled(":sort  ", Style::default().fg(colors::SUBTEXT0).add_modifier(Modifier::DIM)),
-                    Span::styled("u", Style::default().fg(colors::SUBTEXT0)),
-                    Span::styled(":undo  ", Style::default().fg(colors::SUBTEXT0).add_modifier(Modifier::DIM)),
-                    Span::styled("q", Style::default().fg(colors::SUBTEXT0)),
-                    Span::styled(":quit", Style::default().fg(colors::SUBTEXT0).add_modifier(Modifier::DIM)),
-                ])
-            } else {
-                Line::from(Span::styled(
-                    format!(" {}", app.status_message),
-                    Style::default().fg(colors::TEXT),
-                ))
-            }
-        }
-    };
-
-    frame.render_widget(
-        Paragraph::new(content).style(Style::default().bg(colors::SURFACE0)),
-        area,
-    );
-}
+// Status bar is now in panels/statusbar.rs
 
 // ─── Helpers ───────────────────────────────────────────────
 

@@ -16,7 +16,6 @@ pub(crate) fn handle_pending_mode(app: &mut App, code: KeyCode, _modifiers: KeyM
 
     if let KeyCode::Char(c) = code {
         // 1. Handle Double Operator (e.g. `dd`, `yy`) -> Linewise on current line
-        // We need to map key char to Operator to check if it matches
         let op_char = match operator {
             Operator::Delete => 'd',
             Operator::Yank => 'y',
@@ -44,8 +43,6 @@ pub(crate) fn handle_pending_mode(app: &mut App, code: KeyCode, _modifiers: KeyM
                   'a' => { // change authors
                        app.reset_vim_count();
                        app.mode = Mode::Normal;
-                       // We don't have an isolated authors popup yet, but we can open BookForm 
-                       // or we could add a dedicated popup. For now, open full form.
                        app.open_add_popup();
                        app.status_message = "Quick edit: Authors (opening full form)".to_string();
                        return;
@@ -66,15 +63,43 @@ pub(crate) fn handle_pending_mode(app: &mut App, code: KeyCode, _modifiers: KeyM
                        });
                        return;
                   }
+                  's' => { // change status (cycle)
+                       app.reset_vim_count();
+                       app.mode = Mode::Normal;
+                       app.cycle_status();
+                       app.status_message = "Quick edit: Status cycled".to_string();
+                       return;
+                  }
+                  'y' => { // change year
+                       app.reset_vim_count();
+                       app.mode = Mode::Normal;
+                       // Open the full form with cursor on year field
+                       if let Some(book) = app.selected_book() {
+                            let year_str = book.year.map_or(String::new(), |y| y.to_string());
+                            app.open_add_popup();
+                            if let Some(crate::popup::Popup::AddBook(ref mut form)) = app.popup {
+                                 // Pre-fill year field (index 2)
+                                 form.fields[2].value = year_str;
+                                 form.fields[2].cursor = form.fields[2].value.len();
+                                 form.active_field = 2;
+                            }
+                       }
+                       app.status_message = "Quick edit: Year".to_string();
+                       return;
+                  }
+                  'n' => { // change notes (not available yet, status message)
+                       app.reset_vim_count();
+                       app.mode = Mode::Normal;
+                       app.status_message = "Quick edit: Notes (not yet implemented)".to_string();
+                       return;
+                  }
                   _ => {}
              }
         }
 
         // 2. Handle Text Objects (prefix `i` or `a`)
-        // If we are already waiting for a text object target (e.g. we typed `di`)
         if let Some(pending) = app.pending_key {
             if pending == 'i' || pending == 'a' {
-                // Completed text object sequence: `diw`, `dap`
                 app.pending_key = None;
                 let kind = if pending == 'i' { TextObjectKind::Inner } else { TextObjectKind::Around };
                 
@@ -90,10 +115,7 @@ pub(crate) fn handle_pending_mode(app: &mut App, code: KeyCode, _modifiers: KeyM
             if pending == 'g' {
                 app.pending_key = None;
                 if c == 'g' {
-                    // `dgg` -> delete to top
-                    // This is a motion `gg`.
                     let count = app.count_or_one();
-                    // `gg` in motions is mapped to `g`
                     if let Some(range) = motions::get_motion_range(app, 'g', count) {
                         execute_operator(app, operator, range);
                     }
@@ -101,7 +123,6 @@ pub(crate) fn handle_pending_mode(app: &mut App, code: KeyCode, _modifiers: KeyM
                     app.mode = Mode::Normal;
                     return;
                 }
-                // Handle other g-motions if needed
             }
 
             if pending == 'f' || pending == 'F' || pending == 't' || pending == 'T' {
@@ -133,10 +154,6 @@ pub(crate) fn handle_pending_mode(app: &mut App, code: KeyCode, _modifiers: KeyM
             app.push_vim_digit(c.to_digit(10).unwrap());
             return;
         }
-        // Note: '0' is treated as start-of-line motion `0` below, unless it's part of a count (which we don't fully disambiguate here perfectly yet, but `push_vim_digit` handles non-zero).
-        // If we want `d10j`, the `1` is handled, then `0`... currently `0` might be interpreted as motion `0` if we aren't careful.
-        // `app.vim_count` > 0 means we are building a number?
-        // standard vim: `0` is digit if count > 0.
         if c == '0' && app.vim_count > 0 {
             app.push_vim_digit(0);
             return;
@@ -144,7 +161,6 @@ pub(crate) fn handle_pending_mode(app: &mut App, code: KeyCode, _modifiers: KeyM
     }
 
     // 4. Handle Motions
-    // Map keys to motion characters
     let count = app.count_or_one();
     let motion_char = match code {
         KeyCode::Char(c) => c,
@@ -155,17 +171,13 @@ pub(crate) fn handle_pending_mode(app: &mut App, code: KeyCode, _modifiers: KeyM
             app.reset_vim_count();
             return;
         }
-        _ => return, // ignore unknown keys
+        _ => return,
     };
     
     if let Some(range) = motions::get_motion_range(app, motion_char, count) {
         execute_operator(app, operator, range);
         app.reset_vim_count();
         app.mode = Mode::Normal;
-    } else {
-        // Unknown motion or invalid key
-        // app.mode = Mode::Normal; 
-        // app.reset_vim_count();
     }
 }
 
@@ -174,20 +186,30 @@ fn execute_operator(app: &mut App, op: Operator, range: Vec<usize>) {
         Operator::Delete => app.delete_indices(&range),
         Operator::Yank => app.yank_indices(&range),
         Operator::Change => {
-             // Change: delete + enter insert mode?
-             // For now, just delete and notify.
-             // Ideally: app.delete_indices(&range); app.mode = Mode::Insert;
-             // But "Insert" in this TUI usually means "Popup".
-             // We don't have inline editing yet.
-             app.status_message = format!("Change on {} items (not impl fully)", range.len());
+             // Change: delete and enter edit mode
+             app.delete_indices(&range);
+             app.status_message = format!("Changed {} items", range.len());
         }
         Operator::AddTag => {
-             // Indent/Add tag?
-             app.status_message = "Indent > (not impl)".to_string();
+             // Open tag editor for the selected range
+             // For simplicity, open tags editor for first item in range
+             if !range.is_empty() {
+                 let original_idx = app.selected_index;
+                 app.selected_index = range[0];
+                 app.open_edit_tags();
+                 app.selected_index = original_idx;
+                 app.status_message = format!("Add tag to {} items (editing first)", range.len());
+             }
         }
         Operator::RemoveTag => {
-             // Outdent/Remove tag?
-             app.status_message = "Outdent < (not impl)".to_string();
+             // Show current tags, prompt removal
+             if !range.is_empty() {
+                 let original_idx = app.selected_index;
+                 app.selected_index = range[0];
+                 app.open_edit_tags();
+                 app.selected_index = original_idx;
+                 app.status_message = format!("Remove tag from {} items (editing first)", range.len());
+             }
         }
         _ => {}
     }
