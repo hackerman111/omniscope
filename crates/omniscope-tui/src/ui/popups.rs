@@ -212,7 +212,216 @@ pub(crate) fn render_popup(frame: &mut Frame, app: &App, popup: &Popup, area: Re
             overlays::registers::render(frame, app, area);
         }
 
-        Popup::SetStatus { .. } => {}
-        Popup::EasyMotion(_) => {}
+        Popup::SetStatus { current, .. } => {
+            let popup_area = centered_rect(45, 20, area);
+            frame.render_widget(Clear, popup_area);
+
+            let block = Block::default()
+                .title(" Set Status ")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(app.theme.frost_blue()))
+                .style(Style::default().bg(app.theme.bg()));
+
+            let inner = block.inner(popup_area);
+            frame.render_widget(block, popup_area);
+
+            let statuses = [
+                ("1", "○ Unread", omniscope_core::ReadStatus::Unread),
+                ("2", "● Reading", omniscope_core::ReadStatus::Reading),
+                ("3", "✓ Read", omniscope_core::ReadStatus::Read),
+                ("4", "✕ DNF", omniscope_core::ReadStatus::Dnf),
+            ];
+
+            let mut lines = vec![Line::from("")];
+            lines.push(Line::from(Span::styled(
+                format!("  Current: {current}"),
+                Style::default().fg(app.theme.fg()),
+            )));
+            lines.push(Line::from(""));
+            for (key, label, status) in &statuses {
+                let is_current = current == status;
+                let style = if is_current {
+                    Style::default().fg(app.theme.frost_ice()).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(app.theme.fg())
+                };
+                let marker = if is_current { " ◀" } else { "" };
+                lines.push(Line::from(vec![
+                    Span::styled(format!("  [{key}] "), Style::default().fg(app.theme.muted())),
+                    Span::styled(format!("{label}{marker}"), style),
+                ]));
+            }
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
+                "  Space: cycle  Esc: cancel",
+                Style::default().fg(app.theme.muted()).add_modifier(Modifier::DIM),
+            )));
+
+            frame.render_widget(Paragraph::new(lines), inner);
+        }
+
+        Popup::EasyMotion(state) => {
+            // EasyMotion: render labels as an overlay on the book list
+            let popup_area = centered_rect(60, 60, area);
+            frame.render_widget(Clear, popup_area);
+
+            let block = Block::default()
+                .title(if state.pending { " EasyMotion: type first letter " } else { " EasyMotion: type label " })
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(app.theme.yellow()))
+                .style(Style::default().bg(app.theme.bg()));
+
+            let inner = block.inner(popup_area);
+            frame.render_widget(block, popup_area);
+
+            if state.pending {
+                let lines = vec![
+                    Line::from(""),
+                    Line::from(Span::styled(
+                        "  Type the first letter of a book title...",
+                        Style::default().fg(app.theme.muted()),
+                    )),
+                ];
+                frame.render_widget(Paragraph::new(lines), inner);
+            } else {
+                // Show target labels
+                let items: Vec<ListItem> = state.targets.iter().map(|&(label, idx)| {
+                    let title = app.books.get(idx)
+                        .map(|b| b.title.as_str())
+                        .unwrap_or("???");
+                    let line = Line::from(vec![
+                        Span::styled(
+                            format!(" {label} "),
+                            Style::default()
+                                .fg(app.theme.bg())
+                                .bg(app.theme.yellow())
+                                .add_modifier(Modifier::BOLD),
+                        ),
+                        Span::raw("  "),
+                        Span::styled(title, Style::default().fg(app.theme.fg())),
+                    ]);
+                    ListItem::new(line)
+                }).collect();
+
+                frame.render_widget(
+                    List::new(items),
+                    inner,
+                );
+            }
+        }
+
+        Popup::EditYear { input, .. } => {
+            let popup_area = centered_rect(40, 12, area);
+            frame.render_widget(Clear, popup_area);
+
+            let block = Block::default()
+                .title(" Edit Year ")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(app.theme.frost_blue()))
+                .style(Style::default().bg(app.theme.bg()));
+
+            let inner = block.inner(popup_area);
+            frame.render_widget(block, popup_area);
+
+            let lines = vec![
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("  Year: ", Style::default().fg(app.theme.muted())),
+                    Span::styled(format!("{input}█"), Style::default().fg(app.theme.fg_bright())),
+                ]),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "  Enter: save  Esc: cancel",
+                    Style::default().fg(app.theme.muted()).add_modifier(Modifier::DIM),
+                )),
+            ];
+            frame.render_widget(Paragraph::new(lines), inner);
+        }
+
+        Popup::EditAuthors { input, .. } => {
+            let popup_area = centered_rect(55, 12, area);
+            frame.render_widget(Clear, popup_area);
+
+            let block = Block::default()
+                .title(" Edit Authors ")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(app.theme.frost_blue()))
+                .style(Style::default().bg(app.theme.bg()));
+
+            let inner = block.inner(popup_area);
+            frame.render_widget(block, popup_area);
+
+            let lines = vec![
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("  Authors: ", Style::default().fg(app.theme.muted())),
+                    Span::styled(format!("{input}█"), Style::default().fg(app.theme.fg_bright())),
+                ]),
+                Line::from(Span::styled(
+                    "  (comma-separated)",
+                    Style::default().fg(app.theme.muted()).add_modifier(Modifier::DIM),
+                )),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "  Enter: save  Esc: cancel",
+                    Style::default().fg(app.theme.muted()).add_modifier(Modifier::DIM),
+                )),
+            ];
+            frame.render_widget(Paragraph::new(lines), inner);
+        }
+
+        Popup::AddTagPrompt { input, indices, .. } => {
+            let popup_area = centered_rect(45, 12, area);
+            frame.render_widget(Clear, popup_area);
+
+            let block = Block::default()
+                .title(format!(" Add Tag ({} books) ", indices.len()))
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(app.theme.green()))
+                .style(Style::default().bg(app.theme.bg()));
+
+            let inner = block.inner(popup_area);
+            frame.render_widget(block, popup_area);
+
+            let lines = vec![
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("  Tag: ", Style::default().fg(app.theme.muted())),
+                    Span::styled(format!("{input}█"), Style::default().fg(app.theme.fg_bright())),
+                ]),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "  Enter: add  Esc: cancel",
+                    Style::default().fg(app.theme.muted()).add_modifier(Modifier::DIM),
+                )),
+            ];
+            frame.render_widget(Paragraph::new(lines), inner);
+        }
+
+        Popup::RemoveTagPrompt { available_tags, selected, indices, .. } => {
+            let popup_area = centered_rect(45, 25, area);
+            frame.render_widget(Clear, popup_area);
+
+            let block = Block::default()
+                .title(format!(" Remove Tag ({} books) ", indices.len()))
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(app.theme.red()))
+                .style(Style::default().bg(app.theme.bg()));
+
+            let inner = block.inner(popup_area);
+            frame.render_widget(block, popup_area);
+
+            let items: Vec<ListItem> = available_tags.iter().enumerate().map(|(i, tag)| {
+                let is_sel = i == *selected;
+                let style = if is_sel {
+                    Style::default().bg(app.theme.red()).fg(app.theme.bg()).add_modifier(Modifier::BOLD)
+                } else {
+                    Style::default().fg(app.theme.fg())
+                };
+                ListItem::new(Span::styled(format!("  #{tag}  "), style))
+            }).collect();
+
+            frame.render_widget(List::new(items), inner);
+        }
     }
 }

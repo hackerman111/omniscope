@@ -19,27 +19,10 @@ pub fn get_nav_target(app: &App, motion: char, count: usize) -> Option<usize> {
             }
         }
         'G' => {
-            // 'G' -> go to line count-1 (default 1 -> max_idx)
-            // If count is passed as 1 (default), it means "bottom".
-            // If explicit count is given (e.g. 5G), it means line 5.
-            // But verify: vim says "G" goes to line [count], default last line.
-            // Our architecture passes explicit count or 1.
-            // We need to know if count was explicit. We don't have that info here easily
-            // unless we change how count is passed or assume 1 means default.
-            // But 1G is valid (goto line 1).
-            // For now, let's assume if the user typed '1G', they get line 1.
-            // If they typed nothing, count is 1, so they get line 1? No, G default is bottom.
-            // This ambiguity is resolved in `mod.rs` usually.
-            // Let's implement standard Vim behavior:
-            // If we treat "1" as "default/no-count", we can't distinguish "1G" from "G".
-            // In `mod.rs`, we might handle 'G' specifically.
-            // Here, let's assume:
-            // if we are called with count 1, it might be default.
-            // BUT `get_nav_target` should probably just take the "resolved" target?
-            // Actually, for 'G', typical vim behavior:
-            // [count]G -> Go to line [count], default last line.
-            // so we implement:
-            if count == 0 { // Should not happen if we use count_or_one, but safety check
+            // [count]G -> go to line [count], default last line.
+            // count=0 means no explicit count -> go to last line (standard Vim).
+            // count>0 means explicit count -> go to line N.
+            if count == 0 {
                  Some(max_idx)
             } else {
                  Some((count - 1).min(max_idx))
@@ -78,15 +61,8 @@ pub fn get_motion_range(app: &App, motion: char, count: usize) -> Option<Vec<usi
         }
         // G: go to bottom (or line N)
         'G' => {
-            // For G, the target is defined as:
-            // [count]G -> line [count]. Default last line.
-            // However, distinguishing default '1' from explicit '1' is hard if we just pass usize.
-            // Let's assume for ranges (dG), it means "to end of file" if count is 1?
-            // "dG" deletes to end of file. "d1G" deletes to top.
-            // Ideally we need `is_explicit_count` bool.
-            // For now, let's assume 'G' with count 1 is "to bottom".
-            // Because '1G' is rare compared to 'G'.
-            let target = if count <= 1 {
+            // count=0 → to bottom (dG). count>0 → to line N (d5G).
+            let target = if count == 0 {
                  max_idx
              } else {
                  (count - 1).min(max_idx)

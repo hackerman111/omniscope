@@ -1,5 +1,5 @@
 use crate::app::{App, Mode};
-use crate::keys::operator::Operator;
+use crate::keys::core::operator::Operator;
 
 pub struct KeyHint {
     pub key: &'static str,
@@ -150,7 +150,25 @@ pub fn get_hints(app: &App) -> Vec<KeyHint> {
         }
     }
 
-    Vec::new()
+    // 6. Normal mode — show basic hints
+    vec![
+        KeyHint { key: "j/k", desc: "up/down" },
+        KeyHint { key: "h/l", desc: "focus panel" },
+        KeyHint { key: "gg/G", desc: "top/bottom" },
+        KeyHint { key: "d", desc: "delete" },
+        KeyHint { key: "y", desc: "yank" },
+        KeyHint { key: "c", desc: "change" },
+        KeyHint { key: "v/V", desc: "visual" },
+        KeyHint { key: "o/Enter", desc: "open" },
+        KeyHint { key: "/", desc: "search" },
+        KeyHint { key: "Z", desc: "telescope" },
+        KeyHint { key: ":", desc: "command" },
+        KeyHint { key: "u", desc: "undo" },
+        KeyHint { key: "S", desc: "sort" },
+        KeyHint { key: "Space", desc: "easymotion" },
+        KeyHint { key: "g", desc: "g-commands" },
+        KeyHint { key: "z", desc: "viewport" },
+    ]
 }
 
 fn motion_hints() -> Vec<KeyHint> {
@@ -171,7 +189,7 @@ mod tests {
     use omniscope_core::AppConfig;
     
     fn mock_app() -> App {
-        App::new(AppConfig::default())
+        App::new(AppConfig::default(), None)
     }
 
     #[test]

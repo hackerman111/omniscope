@@ -1,17 +1,21 @@
 use crossterm::event::KeyCode;
 use crate::app::{App, Mode};
 use crate::popup::Popup;
-use super::motions;
+use crate::keys::core::motions;
 
 pub fn handle_g_command(app: &mut App, code: KeyCode) {
     match code {
         // gg — go to top
         KeyCode::Char('g') => {
              app.record_jump();
-             let count = app.count_or_one();
-             app.reset_vim_count();
-             if let Some(t) = motions::get_nav_target(app, 'g', count) {
-                 app.selected_index = t;
+             if app.active_panel == crate::app::ActivePanel::Sidebar {
+                 app.move_to_top();
+             } else {
+                 let count = app.count_or_one();
+                 app.reset_vim_count();
+                 if let Some(t) = motions::get_nav_target(app, 'g', count) {
+                     app.selected_index = t;
+                 }
              }
         }
         // gt — quick-edit title
@@ -68,21 +72,17 @@ pub fn handle_g_command(app: &mut App, code: KeyCode) {
             app.open_selected_book();
         }
 
-        // gI — open in $EDITOR
+        // gI — open JSON card in $EDITOR
         KeyCode::Char('I') => {
             if let Some(book) = app.selected_book() {
                 let id = book.id;
                 let cards_dir = app.config.cards_dir();
-                if let Ok(card) = omniscope_core::storage::json_cards::load_card_by_id(&cards_dir, &id) {
-                    if let Some(ref file_info) = card.file {
-                        let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vim".to_string());
-                        let _ = std::process::Command::new(&editor)
-                            .arg(&file_info.path)
-                            .status();
-                        app.status_message = format!("Opened in {editor}");
-                    } else {
-                        app.status_message = "No file attached to this book".to_string();
-                    }
+                let card_path = cards_dir.join(format!("{}.json", id));
+                if card_path.exists() {
+                    app.pending_editor_path = Some(card_path.to_string_lossy().to_string());
+                    app.status_message = "Opening JSON card in $EDITOR...".to_string();
+                } else {
+                    app.status_message = "JSON card file not found".to_string();
                 }
             }
         }

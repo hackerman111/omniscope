@@ -29,7 +29,7 @@ impl Database {
     }
 
     /// Create all tables if they don't exist.
-    fn init_schema(&self) -> Result<()> {
+    pub(crate) fn init_schema(&self) -> Result<()> {
         // Base tables + WAL mode
         self.conn.execute_batch(
             "
@@ -150,6 +150,24 @@ impl Database {
             )?;
             self.conn.execute(
                 "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (2, ?1)",
+                rusqlite::params![chrono::Utc::now().to_rfc3339()],
+            )?;
+        }
+
+        // ── Migration v3: add disk_path column to folders ─────────────
+        let has_disk_path: bool = self
+            .conn
+            .prepare("SELECT 1 FROM pragma_table_info('folders') WHERE name='disk_path'")?
+            .exists([])?;
+        if !has_disk_path {
+            self.conn.execute_batch(
+                "ALTER TABLE folders ADD COLUMN disk_path TEXT;",
+            )?;
+            self.conn.execute_batch(
+                "CREATE INDEX IF NOT EXISTS idx_folders_disk_path ON folders(disk_path);",
+            )?;
+            self.conn.execute(
+                "INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (3, ?1)",
                 rusqlite::params![chrono::Utc::now().to_rfc3339()],
             )?;
         }
@@ -435,12 +453,34 @@ impl Database {
     }
 
     /// Sync all JSON cards from disk into the database.
+    /// Also purges DB entries whose JSON card no longer exists on disk.
     pub fn sync_from_cards(&self, cards_dir: &std::path::Path) -> Result<usize> {
         let cards = crate::storage::json_cards::list_cards(cards_dir)?;
         let count = cards.len();
+
+        // Collect IDs of all cards on disk
+        let disk_ids: std::collections::HashSet<String> = cards.iter()
+            .map(|c| c.id.to_string())
+            .collect();
+
+        // Upsert all cards from disk
         for card in &cards {
             self.upsert_book(card)?;
         }
+
+        // Purge stale DB entries: delete rows whose ID is not on disk
+        let mut stmt = self.conn.prepare("SELECT id FROM books")?;
+        let db_ids: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(0))?
+            .filter_map(|r| r.ok())
+            .collect();
+
+        for db_id in &db_ids {
+            if !disk_ids.contains(db_id) {
+                let _ = self.conn.execute("DELETE FROM books WHERE id = ?1", params![db_id]);
+            }
+        }
+
         Ok(count)
     }
 
@@ -537,11 +577,11 @@ impl Database {
     pub fn list_folders(&self, parent_id: Option<&str>) -> Result<Vec<Folder>> {
         let (sql, params_vec): (&str, Vec<Box<dyn rusqlite::ToSql>>) = match parent_id {
             Some(pid) => (
-                "SELECT id, name, parent_id, library_id FROM folders WHERE parent_id = ?1 ORDER BY name",
+                "SELECT id, name, parent_id, library_id, disk_path FROM folders WHERE parent_id = ?1 ORDER BY name",
                 vec![Box::new(pid.to_owned())],
             ),
             None => (
-                "SELECT id, name, parent_id, library_id FROM folders WHERE parent_id IS NULL ORDER BY name",
+                "SELECT id, name, parent_id, library_id, disk_path FROM folders WHERE parent_id IS NULL ORDER BY name",
                 vec![],
             ),
         };
@@ -553,6 +593,7 @@ impl Database {
                 name: row.get(1)?,
                 parent_id: row.get(2)?,
                 library_id: row.get(3)?,
+                disk_path: row.get(4)?,
             })
         })?;
         rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
@@ -572,6 +613,54 @@ impl Database {
         )?;
         Ok(())
     }
+
+    /// Create a folder with a disk path (relative to library root).
+    pub fn create_folder_with_path(
+        &self,
+        name: &str,
+        parent_id: Option<&str>,
+        library_id: Option<&str>,
+        disk_path: &str,
+    ) -> Result<String> {
+        let id = uuid::Uuid::now_v7().to_string();
+        self.conn.execute(
+            "INSERT INTO folders (id, name, parent_id, library_id, disk_path) VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![id, name, parent_id, library_id, disk_path],
+        )?;
+        Ok(id)
+    }
+
+    /// Find a folder by its disk path (relative).
+    pub fn find_folder_by_disk_path(&self, disk_path: &str) -> Result<Option<String>> {
+        let result = self.conn.query_row(
+            "SELECT id FROM folders WHERE disk_path = ?1",
+            rusqlite::params![disk_path],
+            |row| row.get::<_, String>(0),
+        );
+        match result {
+            Ok(id) => Ok(Some(id)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(OmniscopeError::Database(e)),
+        }
+    }
+
+    /// List all folder disk_path values from the database.
+    pub fn list_all_folder_paths(&self) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT disk_path FROM folders WHERE disk_path IS NOT NULL",
+        )?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
+    }
+
+    /// List all file paths from the books table.
+    pub fn list_all_file_paths(&self) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT file_path FROM books WHERE file_path IS NOT NULL",
+        )?;
+        let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
+        rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
+    }
 }
 
 /// A folder in the library hierarchy.
@@ -581,6 +670,7 @@ pub struct Folder {
     pub name: String,
     pub parent_id: Option<String>,
     pub library_id: Option<String>,
+    pub disk_path: Option<String>,
 }
 
 #[cfg(test)]

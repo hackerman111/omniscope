@@ -9,9 +9,13 @@ pub mod storage;
 pub mod viewer;
 pub mod undo;
 
-pub use config::AppConfig;
+pub use config::{AppConfig, GlobalConfig, KnownLibrary};
 pub use error::{OmniscopeError, Result};
 pub use models::*;
 pub use search::FuzzySearcher;
 pub use search_dsl::SearchQuery;
 pub use storage::database::Database;
+pub use storage::library_root::LibraryRoot;
+pub use storage::init::{init_library, InitOptions};
+pub use storage::folders::{FolderTemplate, SyncReport, sync_folders, scaffold_template, create_folder_on_disk};
+pub use storage::scan::{scan_library, ScanOptions, ScanResult};

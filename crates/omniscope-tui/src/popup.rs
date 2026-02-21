@@ -23,6 +23,14 @@ pub enum Popup {
     Marks,
     /// Selection of registers.
     Registers,
+    /// Quick edit: year.
+    EditYear { book_id: String, input: String, cursor: usize },
+    /// Quick edit: authors (comma-separated).
+    EditAuthors { book_id: String, input: String, cursor: usize },
+    /// Prompt input for adding a tag to a range of books.
+    AddTagPrompt { indices: Vec<usize>, input: String, cursor: usize },
+    /// Prompt input for removing a tag from a range of books.
+    RemoveTagPrompt { indices: Vec<usize>, available_tags: Vec<String>, selected: usize },
 }
 
 /// Telescope internal mode (vim-like).

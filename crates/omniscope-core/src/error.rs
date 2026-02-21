@@ -12,6 +12,15 @@ pub enum OmniscopeError {
     #[error("Library not found: {0}")]
     LibraryNotFound(String),
 
+    #[error("Library not initialized. Run 'omniscope init' in your books directory.")]
+    LibraryNotInitialized,
+
+    #[error("Library already exists at: {0}")]
+    LibraryAlreadyExists(String),
+
+    #[error("Directory does not exist: {0}")]
+    DirectoryNotFound(String),
+
     #[error("Validation error: {0}")]
     ValidationError(String),
 

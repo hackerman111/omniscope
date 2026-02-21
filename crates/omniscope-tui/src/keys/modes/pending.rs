@@ -1,9 +1,10 @@
 use crossterm::event::{KeyCode, KeyModifiers};
 use crate::app::{App, Mode};
-use super::motions;
-use super::find_char;
-use super::text_objects::{self, TextObjectKind};
-use crate::keys::operator::Operator;
+use crate::keys::core::motions;
+use crate::keys::ext::find_char;
+use crate::keys::core::text_objects::{self, TextObjectKind};
+use crate::keys::core::operator::Operator;
+use crate::keys::core::operator::execute_operator;
 
 pub(crate) fn handle_pending_mode(app: &mut App, code: KeyCode, _modifiers: KeyModifiers) {
     let operator = match app.pending_operator {
@@ -43,8 +44,16 @@ pub(crate) fn handle_pending_mode(app: &mut App, code: KeyCode, _modifiers: KeyM
                   'a' => { // change authors
                        app.reset_vim_count();
                        app.mode = Mode::Normal;
-                       app.open_add_popup();
-                       app.status_message = "Quick edit: Authors (opening full form)".to_string();
+                       if let Some(book) = app.selected_book() {
+                            let id = book.id.to_string();
+                            let current = book.authors.join(", ");
+                            app.popup = Some(crate::popup::Popup::EditAuthors {
+                                book_id: id,
+                                input: current.clone(),
+                                cursor: current.len(),
+                            });
+                       }
+                       app.status_message = "Quick edit: Authors".to_string();
                        return;
                   }
                   't' | 'T' => { // change tags / title
@@ -73,16 +82,14 @@ pub(crate) fn handle_pending_mode(app: &mut App, code: KeyCode, _modifiers: KeyM
                   'y' => { // change year
                        app.reset_vim_count();
                        app.mode = Mode::Normal;
-                       // Open the full form with cursor on year field
                        if let Some(book) = app.selected_book() {
+                            let id = book.id.to_string();
                             let year_str = book.year.map_or(String::new(), |y| y.to_string());
-                            app.open_add_popup();
-                            if let Some(crate::popup::Popup::AddBook(ref mut form)) = app.popup {
-                                 // Pre-fill year field (index 2)
-                                 form.fields[2].value = year_str;
-                                 form.fields[2].cursor = form.fields[2].value.len();
-                                 form.active_field = 2;
-                            }
+                            app.popup = Some(crate::popup::Popup::EditYear {
+                                book_id: id,
+                                input: year_str.clone(),
+                                cursor: year_str.len(),
+                            });
                        }
                        app.status_message = "Quick edit: Year".to_string();
                        return;
@@ -158,6 +165,16 @@ pub(crate) fn handle_pending_mode(app: &mut App, code: KeyCode, _modifiers: KeyM
             app.push_vim_digit(0);
             return;
         }
+        
+        // '0' as motion when no count accumulated — go to top
+        if c == '0' && app.vim_count == 0 {
+            if let Some(range) = motions::get_motion_range(app, '0', 1) {
+                execute_operator(app, operator, range);
+            }
+            app.reset_vim_count();
+            app.mode = Mode::Normal;
+            return;
+        }
     }
 
     // 4. Handle Motions
@@ -181,36 +198,3 @@ pub(crate) fn handle_pending_mode(app: &mut App, code: KeyCode, _modifiers: KeyM
     }
 }
 
-fn execute_operator(app: &mut App, op: Operator, range: Vec<usize>) {
-    match op {
-        Operator::Delete => app.delete_indices(&range),
-        Operator::Yank => app.yank_indices(&range),
-        Operator::Change => {
-             // Change: delete and enter edit mode
-             app.delete_indices(&range);
-             app.status_message = format!("Changed {} items", range.len());
-        }
-        Operator::AddTag => {
-             // Open tag editor for the selected range
-             // For simplicity, open tags editor for first item in range
-             if !range.is_empty() {
-                 let original_idx = app.selected_index;
-                 app.selected_index = range[0];
-                 app.open_edit_tags();
-                 app.selected_index = original_idx;
-                 app.status_message = format!("Add tag to {} items (editing first)", range.len());
-             }
-        }
-        Operator::RemoveTag => {
-             // Show current tags, prompt removal
-             if !range.is_empty() {
-                 let original_idx = app.selected_index;
-                 app.selected_index = range[0];
-                 app.open_edit_tags();
-                 app.selected_index = original_idx;
-                 app.status_message = format!("Remove tag from {} items (editing first)", range.len());
-             }
-        }
-        _ => {}
-    }
-}

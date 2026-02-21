@@ -111,15 +111,57 @@ pub(crate) fn handle_visual_mode(app: &mut App, code: KeyCode, modifiers: KeyMod
                  return;
             }
             
-            if let Some(target) = super::motions::get_nav_target(app, c, n) {
+            if c == 'G' {
+                // G in visual: go to bottom (no explicit count in visual)
+                if let Some(target) = crate::keys::core::motions::get_nav_target(app, 'G', 0) {
+                     app.selected_index = target;
+                     app.update_visual_selection();
+                }
+            } else if let Some(target) = crate::keys::core::motions::get_nav_target(app, c, n) {
                  app.selected_index = target;
                  app.update_visual_selection();
             }
         }
+
+        // Screen-relative motions
+        KeyCode::Char('H') => {
+            app.reset_vim_count();
+            app.selected_index = app.viewport_offset;
+            if app.selected_index >= app.books.len() {
+                app.selected_index = 0;
+            }
+            app.update_visual_selection();
+        }
+        KeyCode::Char('M') => {
+            app.reset_vim_count();
+            let visible_height = 20_usize;
+            let mid = app.viewport_offset + visible_height / 2;
+            app.selected_index = mid.min(app.books.len().saturating_sub(1));
+            app.update_visual_selection();
+        }
+        KeyCode::Char('L') => {
+            app.reset_vim_count();
+            let visible_height = 20_usize;
+            let bottom = app.viewport_offset + visible_height.saturating_sub(1);
+            app.selected_index = bottom.min(app.books.len().saturating_sub(1));
+            app.update_visual_selection();
+        }
+
+        // Group navigation
+        KeyCode::Char('{') => {
+            app.reset_vim_count();
+            app.move_prev_group();
+            app.update_visual_selection();
+        }
+        KeyCode::Char('}') => {
+            app.reset_vim_count();
+            app.move_next_group();
+            app.update_visual_selection();
+        }
         KeyCode::Down => {
             let n = app.count_or_one();
             app.reset_vim_count();
-            if let Some(target) = super::motions::get_nav_target(app, 'j', n) {
+            if let Some(target) = crate::keys::core::motions::get_nav_target(app, 'j', n) {
                  app.selected_index = target;
                  app.update_visual_selection();
             }
@@ -127,7 +169,7 @@ pub(crate) fn handle_visual_mode(app: &mut App, code: KeyCode, modifiers: KeyMod
         KeyCode::Up => {
             let n = app.count_or_one();
             app.reset_vim_count();
-            if let Some(target) = super::motions::get_nav_target(app, 'k', n) {
+            if let Some(target) = crate::keys::core::motions::get_nav_target(app, 'k', n) {
                  app.selected_index = target;
                  app.update_visual_selection();
             }
@@ -169,11 +211,52 @@ pub(crate) fn handle_visual_mode(app: &mut App, code: KeyCode, modifiers: KeyMod
              save_and_exit_visual(app);
         }
         KeyCode::Char('c') => {
-             // Change: delete selection
+             // Change: open tags editor for the first selected item (don't delete!)
              let selections = app.visual_selections.clone();
-             app.delete_indices(&selections);
+             if !selections.is_empty() {
+                 app.selected_index = selections[0];
+                 app.open_edit_tags();
+             }
              save_and_exit_visual(app);
-             app.status_message = format!("Changed {} items", selections.len());
+             app.status_message = format!("Change {} items", selections.len());
+        }
+
+        // Tag operators in visual mode
+        KeyCode::Char('>') => {
+            let selections = app.visual_selections.clone();
+            if !selections.is_empty() {
+                app.popup = Some(crate::popup::Popup::AddTagPrompt {
+                    indices: selections,
+                    input: String::new(),
+                    cursor: 0,
+                });
+            }
+            save_and_exit_visual(app);
+        }
+        KeyCode::Char('<') => {
+            let selections = app.visual_selections.clone();
+            if !selections.is_empty() {
+                let mut tags: Vec<String> = Vec::new();
+                for &i in &selections {
+                    if let Some(book) = app.books.get(i) {
+                        for tag in &book.tags {
+                            if !tags.contains(tag) {
+                                tags.push(tag.clone());
+                            }
+                        }
+                    }
+                }
+                if !tags.is_empty() {
+                    app.popup = Some(crate::popup::Popup::RemoveTagPrompt {
+                        indices: selections,
+                        available_tags: tags,
+                        selected: 0,
+                    });
+                } else {
+                    app.status_message = "No tags to remove".to_string();
+                }
+            }
+            save_and_exit_visual(app);
         }
 
         // Registers

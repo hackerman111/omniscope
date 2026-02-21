@@ -35,18 +35,28 @@ impl App {
 
     /// Refresh the book list based on current sidebar filter.
     pub fn refresh_books(&mut self) {
+        // Remember current book ID to restore cursor position
+        let current_id = self.books.get(self.selected_index).map(|b| b.id);
+
         self.all_books = self
             .db
             .as_ref()
             .and_then(|db| db.list_books(500, 0).ok())
             .unwrap_or_default();
 
-        self.apply_filter();
+        self.apply_filter_preserve_cursor(current_id);
         self.refresh_sidebar();
     }
 
     /// Apply the current sidebar filter to the book list.
     pub fn apply_filter(&mut self) {
+        self.apply_filter_preserve_cursor(None);
+    }
+
+    /// Apply the current sidebar filter, optionally preserving cursor on a specific book ID.
+    fn apply_filter_preserve_cursor(&mut self, preserve_id: Option<uuid::Uuid>) {
+        let current_id = preserve_id.or_else(|| self.books.get(self.selected_index).map(|b| b.id));
+
         self.books = match &self.sidebar_filter {
             SidebarFilter::All => self.all_books.clone(),
             SidebarFilter::Library(lib) => {
@@ -64,7 +74,20 @@ impl App {
                 }
             }
         };
-        self.selected_index = 0;
+
+        // Restore cursor: find the same book by ID, else clamp to valid range
+        if let Some(id) = current_id {
+            if let Some(pos) = self.books.iter().position(|b| b.id == id) {
+                self.selected_index = pos;
+            } else {
+                // Book was deleted or filtered out — clamp
+                if self.selected_index >= self.books.len() {
+                    self.selected_index = self.books.len().saturating_sub(1);
+                }
+            }
+        } else {
+            self.selected_index = 0;
+        }
     }
 
     /// Handle sidebar Enter — apply filter.

@@ -61,7 +61,7 @@ pub fn render(frame: &mut Frame, app: &App) {
 }
 
 fn render_key_hints(frame: &mut Frame, app: &App, area: Rect) {
-    use crate::keys::hints::get_hints;
+    use crate::keys::ui::hints::get_hints;
     let hints = get_hints(app);
     if hints.is_empty() { return; }
     

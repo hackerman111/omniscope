@@ -1,10 +1,15 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
-use omniscope_core::{AppConfig, BookCard, Database};
+use omniscope_core::{
+    AppConfig, BookCard, Database, GlobalConfig, LibraryRoot,
+    init_library, InitOptions,
+    scan_library, ScanOptions,
+    FolderTemplate, scaffold_template, sync_folders,
+};
 use omniscope_tui::app::App;
 
 // ─── CLI Definition ─────────────────────────────────────────────────────────
@@ -104,6 +109,51 @@ enum Commands {
 
     /// Show version information.
     Version,
+
+    /// Initialize a new library in a directory.
+    Init {
+        /// Directory to initialize (defaults to current directory).
+        #[arg(default_value = ".")]
+        path: String,
+
+        /// Name for this library.
+        #[arg(long)]
+        name: Option<String>,
+
+        /// Create the directory if it doesn't exist.
+        #[arg(long)]
+        create_dir: bool,
+
+        /// Scan existing files and create book cards.
+        #[arg(long)]
+        scan_existing: bool,
+    },
+
+    /// Scan the library directory for new/changed book files.
+    Scan {
+        /// Automatically create cards for discovered files.
+        #[arg(long)]
+        auto_create_cards: bool,
+    },
+
+    /// Sync the file system with the library database.
+    Sync,
+
+    /// Manage known libraries.
+    Libraries {
+        #[command(subcommand)]
+        action: LibrariesAction,
+    },
+}
+
+// ─── Libraries Actions ──────────────────────────────────────────────────────
+
+#[derive(Subcommand)]
+enum LibrariesAction {
+    /// List all known libraries.
+    List,
+    /// Forget a library (remove from registry; data is NOT deleted).
+    Forget { path: String },
 }
 
 // ─── Book Actions ───────────────────────────────────────────────────────────
@@ -218,6 +268,16 @@ enum FolderAction {
     Delete { id: String },
     /// Rename a folder.
     Rename { id: String, name: String },
+    /// Scaffold directories from a template.
+    Scaffold {
+        /// Template name: research, personal, technical.
+        template: String,
+        /// Preview only — don't create anything.
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Sync disk folders with the library database.
+    Sync,
 }
 
 // ─── Config Actions ──────────────────────────────────────────────────────────
@@ -243,19 +303,32 @@ fn main() -> Result<()> {
 
     let timing = std::env::var("OMNISCOPE_TIMING").as_deref() == Ok("1");
 
-    // Load config (honors OMNISCOPE_LIBRARY_PATH if set)
+    // Load global config
+    let global_config = GlobalConfig::load()?;
+
+    // Load legacy AppConfig (for backward compat during migration)
     let mut config = AppConfig::load()?;
     if let Ok(lib_path) = std::env::var("OMNISCOPE_LIBRARY_PATH") {
         config.set_library_path(lib_path.into());
     }
 
+    // Discover library root from CWD using the full fallback chain
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let library_root = LibraryRoot::discover_with_fallbacks(&cwd, &global_config);
+
     if timing {
-        eprintln!("[timing] config loaded in {:.1}ms", start.elapsed().as_secs_f64() * 1000.0);
+        if let Some(ref lr) = library_root {
+            eprintln!("[timing] library discovered at {} in {:.1}ms",
+                lr.root().display(), start.elapsed().as_secs_f64() * 1000.0);
+        } else {
+            eprintln!("[timing] no library found, config loaded in {:.1}ms",
+                start.elapsed().as_secs_f64() * 1000.0);
+        }
     }
 
     match cli.command {
         None => {
-            let mut app = App::new(config);
+            let mut app = App::new(config, library_root.clone());
             omniscope_tui::run_tui(&mut app)?;
         }
 
@@ -739,6 +812,86 @@ fn main() -> Result<()> {
                     println!("Renamed folder to '{name}'.");
                 }
             }
+            FolderAction::Scaffold { template, dry_run } => {
+                let lr = require_library(&library_root, json_output)?;
+                let db = open_db_from_root(&lr)?;
+
+                let tmpl = FolderTemplate::from_str(&template).ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "Unknown template '{}'. Available: research, personal, technical",
+                        template
+                    )
+                })?;
+
+                let created = scaffold_template(&lr, &db, tmpl, dry_run)?;
+                let dur = start.elapsed().as_millis();
+
+                if json_output {
+                    print_json(&serde_json::json!({
+                        "status": "ok",
+                        "data": { "created": created, "dry_run": dry_run },
+                        "meta": { "duration_ms": dur }
+                    }))?;
+                } else if dry_run {
+                    println!("Would create {} directories:", created.len());
+                    for d in &created {
+                        println!("  📁 {}/{}", lr.root().display(), d);
+                    }
+                    println!("\nRun without --dry-run to apply.");
+                } else if created.is_empty() {
+                    println!("All directories already exist. Nothing to create.");
+                } else {
+                    println!("Created {} directories:", created.len());
+                    for d in &created {
+                        println!("  📁 {}", d);
+                    }
+                }
+            }
+            FolderAction::Sync => {
+                let lr = require_library(&library_root, json_output)?;
+                let db = open_db_from_root(&lr)?;
+
+                let report = sync_folders(&lr, &db)?;
+                let dur = start.elapsed().as_millis();
+
+                if json_output {
+                    print_json(&serde_json::json!({
+                        "status": "ok",
+                        "data": {
+                            "in_sync": report.in_sync,
+                            "new_on_disk": report.new_on_disk,
+                            "missing_on_disk": report.missing_on_disk,
+                            "untracked_files": report.untracked_files.iter()
+                                .map(|p| p.display().to_string()).collect::<Vec<_>>(),
+                        },
+                        "meta": { "duration_ms": dur }
+                    }))?;
+                } else {
+                    println!("Folder sync report:");
+                    println!("  ✓  {} folder(s) in sync", report.in_sync);
+                    if !report.new_on_disk.is_empty() {
+                        println!("  ⊕  {} new folder(s) on disk (not tracked):", report.new_on_disk.len());
+                        for f in &report.new_on_disk {
+                            println!("       {}", f);
+                        }
+                    }
+                    if !report.missing_on_disk.is_empty() {
+                        println!("  ⊘  {} folder(s) missing on disk:", report.missing_on_disk.len());
+                        for f in &report.missing_on_disk {
+                            println!("       {}", f);
+                        }
+                    }
+                    if !report.untracked_files.is_empty() {
+                        println!("  ？ {} untracked file(s):", report.untracked_files.len());
+                        for f in &report.untracked_files {
+                            println!("       {}", f.display());
+                        }
+                    }
+                    if report.is_clean() {
+                        println!("\nAll clean ✓");
+                    }
+                }
+            }
         },
 
         // ── Config ─────────────────────────────────────────────────────────
@@ -814,24 +967,35 @@ fn main() -> Result<()> {
                 println!("○ Config: not found (using defaults)");
             }
 
-            let db_path = config.database_path();
             let mut issues = 0;
-            match Database::open(&db_path) {
-                Ok(db) => {
-                    let count = db.count_books().unwrap_or(0);
-                    println!("✓ Database: {} ({count} books)", db_path.display());
-                }
-                Err(e) => { issues += 1; println!("✗ Database: {e}"); }
-            }
 
-            let cards_dir = config.cards_dir();
-            if cards_dir.exists() {
-                let cc = std::fs::read_dir(&cards_dir)
-                    .map(|rd| rd.filter(|e| e.as_ref().is_ok_and(|e| e.path().extension().is_some_and(|ext| ext == "json"))).count())
-                    .unwrap_or(0);
-                println!("✓ Cards: {} ({cc} files)", cards_dir.display());
+            if let Some(ref lr) = library_root {
+                println!("✓ Library: {}", lr.root().display());
+                let db_path = lr.database_path();
+                match Database::open(&db_path) {
+                    Ok(db) => {
+                        let count = db.count_books().unwrap_or(0);
+                        println!("✓ Database: {} ({count} books)", db_path.display());
+                    }
+                    Err(e) => { issues += 1; println!("✗ Database: {e}"); }
+                }
+
+                let cards_dir = lr.cards_dir();
+                if cards_dir.exists() {
+                    let cc = std::fs::read_dir(&cards_dir)
+                        .map(|rd| rd.filter(|e| e.as_ref().is_ok_and(|e| e.path().extension().is_some_and(|ext| ext == "json"))).count())
+                        .unwrap_or(0);
+                    println!("✓ Cards: {} ({cc} files)", cards_dir.display());
+                } else {
+                    println!("○ Cards: directory not created yet");
+                }
             } else {
-                println!("○ Cards: directory not created yet");
+                println!("○ Library: not found (run 'omniscope init' to create one)");
+                // Fall back to legacy path check
+                let db_path = config.database_path();
+                if db_path.exists() {
+                    println!("  ↳ Legacy DB found at: {}", db_path.display());
+                }
             }
 
             if issues == 0 { println!("\nAll checks passed ✓"); }
@@ -849,6 +1013,158 @@ fn main() -> Result<()> {
                 println!("omniscope v{version}");
             }
         }
+
+        // ── Init ───────────────────────────────────────────────────────────
+
+        Some(Commands::Init { path, name, create_dir, scan_existing }) => {
+            let root = PathBuf::from(&path).canonicalize().unwrap_or_else(|_| PathBuf::from(&path));
+            let opts = InitOptions {
+                name: name.clone(),
+                create_dir,
+                scan_existing,
+            };
+
+            match init_library(&root, opts) {
+                Ok(lr) => {
+                    let manifest = lr.load_manifest()?;
+                    let dur = start.elapsed().as_millis();
+
+                    // Register in global config
+                    let mut gc = GlobalConfig::load()?;
+                    gc.add_library(&manifest.library.name, lr.root(), &manifest.library.id);
+                    let _ = gc.save();
+
+                    if json_output {
+                        print_json(&serde_json::json!({
+                            "status": "ok",
+                            "data": {
+                                "root": lr.root().display().to_string(),
+                                "name": manifest.library.name,
+                                "id": manifest.library.id,
+                            },
+                            "meta": { "duration_ms": dur }
+                        }))?;
+                    } else {
+                        println!("Initialized library '{}' at {}", manifest.library.name, lr.root().display());
+                        println!("  ID: {}", manifest.library.id);
+                        println!("  .libr/ directory created with: cards/, db/, cache/, undo/, backups/");
+                        if scan_existing {
+                            // Scan will be implemented in Phase C
+                            println!("  (--scan-existing is not yet implemented)");
+                        }
+                    }
+                }
+                Err(e) => {
+                    if json_output {
+                        print_json(&serde_json::json!({"status":"error","error":e.to_string()}))?;
+                    } else {
+                        eprintln!("Error: {e}");
+                    }
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        // ── Scan ───────────────────────────────────────────────────────────
+
+        Some(Commands::Scan { auto_create_cards }) => {
+            let lr = require_library(&library_root, json_output)?;
+            let db = open_db_from_root(&lr)?;
+
+            let opts = ScanOptions {
+                auto_create_cards,
+                recursive: true,
+                subdirectory: None,
+            };
+
+            let result = scan_library(&lr, &db, opts)?;
+            let dur = start.elapsed().as_millis();
+
+            if json_output {
+                print_json(&serde_json::json!({
+                    "status": "ok",
+                    "data": {
+                        "total_files": result.total_files,
+                        "known_files": result.known_files,
+                        "new_files": result.new_files.len(),
+                        "cards_created": result.cards_created,
+                        "errors": result.errors.len(),
+                    },
+                    "meta": { "duration_ms": dur }
+                }))?;
+            } else {
+                println!("Scan complete:");
+                println!("  Total files: {}", result.total_files);
+                println!("  Known:       {}", result.known_files);
+                println!("  New:         {}", result.new_files.len());
+                if auto_create_cards {
+                    println!("  Created:     {}", result.cards_created);
+                }
+                if !result.errors.is_empty() {
+                    println!("  Errors:      {}", result.errors.len());
+                    for (path, err) in &result.errors {
+                        eprintln!("    {} — {}", path.display(), err);
+                    }
+                }
+                if !result.new_files.is_empty() && !auto_create_cards {
+                    println!("\n  Use --auto-create-cards to create cards for new files.");
+                }
+            }
+        }
+
+        // ── Sync ───────────────────────────────────────────────────────────
+
+        Some(Commands::Sync) => {
+            let lr = require_library(&library_root, json_output)?;
+            let db = open_db_from_root(&lr)?;
+            let cards_dir = lr.cards_dir();
+            if cards_dir.exists() {
+                let count = db.sync_from_cards(&cards_dir)?;
+                let dur = start.elapsed().as_millis();
+                if json_output {
+                    print_json(&serde_json::json!({"status":"ok","data":{"synced":count},"meta":{"duration_ms":dur}}))?;
+                } else {
+                    println!("Synced {count} card(s) into database.");
+                }
+            } else {
+                println!("No cards directory found. Nothing to sync.");
+            }
+        }
+
+        // ── Libraries ──────────────────────────────────────────────────────
+
+        Some(Commands::Libraries { action }) => match action {
+            LibrariesAction::List => {
+                let gc = GlobalConfig::load()?;
+                let dur = start.elapsed().as_millis();
+                if json_output {
+                    let items: Vec<serde_json::Value> = gc.known_libraries().iter().map(|l| {
+                        serde_json::json!({"name": l.name, "path": l.path, "id": l.id})
+                    }).collect();
+                    print_json(&serde_json::json!({"status":"ok","data":items,"meta":{"duration_ms":dur}}))?;
+                } else if gc.known_libraries().is_empty() {
+                    println!("No known libraries. Run 'omniscope init' in a directory to create one.");
+                } else {
+                    for lib in gc.known_libraries() {
+                        let active = library_root.as_ref()
+                            .is_some_and(|lr| lr.root().to_string_lossy() == lib.path);
+                        let marker = if active { " *" } else { "" };
+                        println!("  📚 {} — {}{marker}", lib.name, lib.path);
+                    }
+                }
+            }
+            LibrariesAction::Forget { path } => {
+                let mut gc = GlobalConfig::load()?;
+                gc.remove_library(Path::new(&path));
+                gc.save()?;
+                let dur = start.elapsed().as_millis();
+                if json_output {
+                    print_json(&serde_json::json!({"status":"ok","data":{"forgotten":path},"meta":{"duration_ms":dur}}))?;
+                } else {
+                    println!("Removed '{}' from known libraries. Data is NOT deleted.", path);
+                }
+            }
+        },
     }
 
     if timing {
@@ -865,12 +1181,59 @@ fn print_json(val: &serde_json::Value) -> Result<()> {
     Ok(())
 }
 
+/// Open a database from a discovered LibraryRoot.
+fn open_db_from_root(lr: &LibraryRoot) -> Result<Database> {
+    let db_path = lr.database_path();
+    if let Some(parent) = db_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    Ok(Database::open(&db_path)?)
+}
+
+/// Legacy: open DB using config paths (for backward compat when no .libr/ exists).
 fn open_db(config: &AppConfig) -> Result<Database> {
     let db_path = config.database_path();
     if let Some(parent) = db_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
     Ok(Database::open(&db_path)?)
+}
+
+/// Resolve the database: prefer LibraryRoot, fall back to legacy config.
+fn resolve_db(library_root: &Option<LibraryRoot>, config: &AppConfig) -> Result<Database> {
+    if let Some(lr) = library_root {
+        open_db_from_root(lr)
+    } else {
+        open_db(config)
+    }
+}
+
+/// Resolve the cards directory: prefer LibraryRoot, fall back to legacy config.
+fn resolve_cards_dir(library_root: &Option<LibraryRoot>, config: &AppConfig) -> PathBuf {
+    if let Some(lr) = library_root {
+        lr.cards_dir()
+    } else {
+        config.cards_dir()
+    }
+}
+
+/// Require a library root (exit with error if not found).
+fn require_library(library_root: &Option<LibraryRoot>, json_output: bool) -> Result<LibraryRoot> {
+    match library_root {
+        Some(lr) => Ok(lr.clone()),
+        None => {
+            if json_output {
+                print_json(&serde_json::json!({
+                    "status": "error",
+                    "error": "no_library",
+                    "message": "No library found. Run 'omniscope init' in your books directory."
+                }))?;
+            } else {
+                eprintln!("No library found. Run 'omniscope init' in your books directory.");
+            }
+            std::process::exit(1);
+        }
+    }
 }
 
 fn config_key_values(config: &AppConfig) -> std::collections::HashMap<&'static str, String> {

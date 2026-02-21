@@ -297,7 +297,7 @@ impl App {
         if !cards_to_delete.is_empty() {
              self.push_undo(
                  format!("Deleted {} items", cards_to_delete.len()),
-                 UndoAction::DeleteCards(cards_to_delete)
+                 UndoAction::UpsertCards(cards_to_delete)
              );
         }
         
@@ -358,12 +358,14 @@ impl App {
     /// Reset vim count and operator.
     pub fn reset_vim_count(&mut self) {
         self.vim_count = 0;
+        self.has_explicit_count = false;
         self.pending_operator = None;
         // Don't reset register here as it might be set before operator
     }
 
     /// Accumulate a digit into vim_count.
     pub fn push_vim_digit(&mut self, d: u32) {
+        self.has_explicit_count = true;
         self.vim_count = self.vim_count.saturating_mul(10).saturating_add(d);
     }
 }

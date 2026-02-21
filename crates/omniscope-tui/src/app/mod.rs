@@ -3,11 +3,11 @@ mod navigation;
 mod sidebar;
 mod vim;
 
-use omniscope_core::{AppConfig, BookCard, BookSummaryView, Database, FuzzySearcher, undo::UndoEntry};
+use omniscope_core::{AppConfig, BookCard, BookSummaryView, Database, FuzzySearcher, LibraryRoot, undo::UndoEntry};
 use crate::popup::Popup;
-use crate::keys::operator::Operator;
-use crate::keys::jump_list::JumpList;
-use crate::keys::macro_recorder::MacroRecorder;
+use crate::keys::core::operator::Operator;
+use crate::keys::ext::jump_list::JumpList;
+use crate::keys::ui::macro_recorder::MacroRecorder;
 use crate::theme::NordTheme;
 
 /// Search direction for `/` and `?` searches.
@@ -176,6 +176,9 @@ pub struct App {
     /// App configuration.
     pub config: AppConfig,
 
+    /// Discovered library root (`.libr/`-based), if any.
+    pub library_root: Option<LibraryRoot>,
+
     // ─── Phase 1: Vim extras ────────────────────────────────
 
     /// Accumulated numeric count prefix for motions (e.g. `5j`).
@@ -221,6 +224,9 @@ pub struct App {
     /// Last find-char motion (char we looked for, the motion key used f/F/t/T)
     pub last_find_char: Option<(char, char)>,
 
+    /// Whether the user typed an explicit digit count (to distinguish `G` from `1G`).
+    pub has_explicit_count: bool,
+
     // ─── Phase 2: Viewport & Navigation ─────────────────────
 
     /// Manual viewport scroll offset (for zz/zt/zb and Ctrl+e/y).
@@ -262,13 +268,22 @@ pub struct App {
 
     /// Persistent clipboard instance to avoid "dropped too fast" warnings.
     pub clipboard: Option<arboard::Clipboard>,
+
+    /// Path to open in $EDITOR (requires terminal suspension, handled by main loop).
+    pub pending_editor_path: Option<String>,
 }
 
 impl App {
     /// Create a new App with default state.
-    pub fn new(config: AppConfig) -> Self {
+    pub fn new(config: AppConfig, library_root: Option<LibraryRoot>) -> Self {
+        // Derive DB and cards paths from library root if available, else use config
+        let (db_path, cards_dir) = if let Some(ref lr) = library_root {
+            (lr.database_path(), lr.cards_dir())
+        } else {
+            (config.database_path(), config.cards_dir())
+        };
+
         // Try to open the database
-        let db_path = config.database_path();
         let db = if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent).ok();
             Database::open(&db_path).ok()
@@ -278,7 +293,6 @@ impl App {
 
         // Sync JSON cards into SQLite
         if let Some(ref db) = db {
-            let cards_dir = config.cards_dir();
             if cards_dir.exists() {
                 let _ = db.sync_from_cards(&cards_dir);
             }
@@ -292,6 +306,12 @@ impl App {
 
         let books = all_books.clone();
 
+        let status_message = if library_root.is_some() {
+            String::new()
+        } else {
+            "No library found. Run 'omniscope init' to create one.".to_string()
+        };
+
         let mut app = Self {
             should_quit: false,
             mode: Mode::Normal,
@@ -302,7 +322,7 @@ impl App {
             sidebar_items: Vec::new(),
             sidebar_selected: 0,
             sidebar_filter: SidebarFilter::All,
-            status_message: String::new(),
+            status_message,
             command_input: String::new(),
             search_input: String::new(),
             popup: None,
@@ -312,6 +332,7 @@ impl App {
             fuzzy_searcher: FuzzySearcher::new(),
             db,
             config,
+            library_root,
             // Phase 1 fields
             vim_count: 0,
             pending_operator: None,
@@ -328,6 +349,7 @@ impl App {
             quickfix_show: false,
             quickfix_selected: 0,
             last_find_char: None,
+            has_explicit_count: false,
             viewport_offset: 0,
             last_jump_pos: None,
             last_visual_range: None,
@@ -340,6 +362,7 @@ impl App {
             ai_input: String::new(),
             theme: NordTheme::default(),
             clipboard: arboard::Clipboard::new().ok(),
+            pending_editor_path: None,
         };
 
         app.refresh_sidebar();
@@ -349,5 +372,14 @@ impl App {
     /// Currently selected book (if any).
     pub fn selected_book(&self) -> Option<&BookSummaryView> {
         self.books.get(self.selected_index)
+    }
+
+    /// Get the cards directory, preferring LibraryRoot over legacy config.
+    pub fn cards_dir(&self) -> std::path::PathBuf {
+        if let Some(ref lr) = self.library_root {
+            lr.cards_dir()
+        } else {
+            self.config.cards_dir()
+        }
     }
 }

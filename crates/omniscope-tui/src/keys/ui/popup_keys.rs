@@ -184,6 +184,27 @@ pub(crate) fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModif
 
         Some(Popup::SetStatus { .. }) => match code {
             KeyCode::Esc => { app.popup = None; }
+            KeyCode::Char(' ') => {
+                // Cycle through statuses
+                app.popup = None;
+                app.cycle_status();
+            }
+            KeyCode::Char('1') => {
+                app.popup = None;
+                app.set_status(omniscope_core::ReadStatus::Unread);
+            }
+            KeyCode::Char('2') => {
+                app.popup = None;
+                app.set_status(omniscope_core::ReadStatus::Reading);
+            }
+            KeyCode::Char('3') => {
+                app.popup = None;
+                app.set_status(omniscope_core::ReadStatus::Read);
+            }
+            KeyCode::Char('4') => {
+                app.popup = None;
+                app.set_status(omniscope_core::ReadStatus::Dnf);
+            }
             _ => {}
         },
 
@@ -371,6 +392,7 @@ pub(crate) fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModif
         }
 
         Some(Popup::EasyMotion(state)) => {
+            let is_pending = state.pending;
             let state_clone = state.clone(); // Clone to avoid borrow checker issues
             match code {
                 KeyCode::Esc => {
@@ -378,7 +400,20 @@ pub(crate) fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModif
                     app.status_message = "EasyMotion cancelled".to_string();
                 }
                 KeyCode::Char(c) => {
-                    if let Some(&(_, idx)) = state_clone.targets.iter().find(|&&(tc, _)| tc == c) {
+                    if is_pending {
+                        // Space / <char> — filter by first letter, build targets
+                        let targets = crate::keys::ext::easy_motion::build_easy_motion_targets_by_char(app, c);
+                        if targets.is_empty() {
+                            app.popup = None;
+                            app.status_message = format!("No books starting with '{c}'");
+                        } else {
+                            app.popup = Some(Popup::EasyMotion(crate::popup::EasyMotionState {
+                                pending: false,
+                                targets,
+                            }));
+                            app.status_message = format!("EasyMotion ('{c}'): type target label");
+                        }
+                    } else if let Some(&(_, idx)) = state_clone.targets.iter().find(|&&(tc, _)| tc == c) {
                         app.selected_index = idx;
                         app.popup = None;
                         app.status_message = "EasyMotion jump success".to_string();
@@ -397,6 +432,136 @@ pub(crate) fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModif
             }
             _ => {}
         },
+
+        Some(Popup::EditYear { .. }) => {
+            match code {
+                KeyCode::Esc => { app.popup = None; }
+                KeyCode::Enter => {
+                    if let Some(Popup::EditYear { book_id, input, .. }) = app.popup.take() {
+                        app.submit_edit_year(&book_id, &input);
+                    }
+                }
+                KeyCode::Backspace => {
+                    if let Some(Popup::EditYear { ref mut input, ref mut cursor, .. }) = app.popup {
+                        if *cursor > 0 {
+                            input.remove(*cursor - 1);
+                            *cursor -= 1;
+                        }
+                    }
+                }
+                KeyCode::Char(c) if c.is_ascii_digit() || c == '-' => {
+                    if let Some(Popup::EditYear { ref mut input, ref mut cursor, .. }) = app.popup {
+                        input.insert(*cursor, c);
+                        *cursor += 1;
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        Some(Popup::EditAuthors { .. }) => {
+            match code {
+                KeyCode::Esc => { app.popup = None; }
+                KeyCode::Enter => {
+                    if let Some(Popup::EditAuthors { book_id, input, .. }) = app.popup.take() {
+                        app.submit_edit_authors(&book_id, &input);
+                    }
+                }
+                KeyCode::Backspace => {
+                    if let Some(Popup::EditAuthors { ref mut input, ref mut cursor, .. }) = app.popup {
+                        if *cursor > 0 {
+                            let prev = input[..*cursor]
+                                .char_indices().last().map(|(i, _)| i).unwrap_or(0);
+                            input.remove(prev);
+                            *cursor = prev;
+                        }
+                    }
+                }
+                KeyCode::Left => {
+                    if let Some(Popup::EditAuthors { ref mut cursor, ref input, .. }) = app.popup {
+                        if *cursor > 0 {
+                            *cursor = input[..*cursor]
+                                .char_indices().last().map(|(i, _)| i).unwrap_or(0);
+                        }
+                    }
+                }
+                KeyCode::Right => {
+                    if let Some(Popup::EditAuthors { ref mut cursor, ref input, .. }) = app.popup {
+                        if *cursor < input.len() {
+                            *cursor = input[*cursor..]
+                                .char_indices().nth(1).map(|(i, _)| *cursor + i)
+                                .unwrap_or(input.len());
+                        }
+                    }
+                }
+                KeyCode::Char(c) => {
+                    if let Some(Popup::EditAuthors { ref mut input, ref mut cursor, .. }) = app.popup {
+                        input.insert(*cursor, c);
+                        *cursor += c.len_utf8();
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        Some(Popup::AddTagPrompt { .. }) => {
+            match code {
+                KeyCode::Esc => { app.popup = None; }
+                KeyCode::Enter => {
+                    if let Some(Popup::AddTagPrompt { indices, input, .. }) = app.popup.take() {
+                        if !input.trim().is_empty() {
+                            app.add_tag_to_indices(&indices, &input);
+                        }
+                    }
+                }
+                KeyCode::Backspace => {
+                    if let Some(Popup::AddTagPrompt { ref mut input, ref mut cursor, .. }) = app.popup {
+                        if *cursor > 0 {
+                            let prev = input[..*cursor]
+                                .char_indices().last().map(|(i, _)| i).unwrap_or(0);
+                            input.remove(prev);
+                            *cursor = prev;
+                        }
+                    }
+                }
+                KeyCode::Char(c) => {
+                    if let Some(Popup::AddTagPrompt { ref mut input, ref mut cursor, .. }) = app.popup {
+                        input.insert(*cursor, c);
+                        *cursor += c.len_utf8();
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        Some(Popup::RemoveTagPrompt { .. }) => {
+            match code {
+                KeyCode::Esc => { app.popup = None; }
+                KeyCode::Enter => {
+                    if let Some(Popup::RemoveTagPrompt { indices, available_tags, selected, .. }) = app.popup.take() {
+                        if let Some(tag) = available_tags.get(selected) {
+                            let tag = tag.clone();
+                            app.remove_tag_from_indices(&indices, &tag);
+                        }
+                    }
+                }
+                KeyCode::Char('j') | KeyCode::Down => {
+                    if let Some(Popup::RemoveTagPrompt { ref mut selected, ref available_tags, .. }) = app.popup {
+                        if *selected + 1 < available_tags.len() {
+                            *selected += 1;
+                        }
+                    }
+                }
+                KeyCode::Char('k') | KeyCode::Up => {
+                    if let Some(Popup::RemoveTagPrompt { ref mut selected, .. }) = app.popup {
+                        if *selected > 0 {
+                            *selected -= 1;
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
 
         None => {}
     }

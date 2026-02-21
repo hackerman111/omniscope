@@ -183,6 +183,28 @@ impl App {
         }
     }
 
+    /// Set read status to a specific value for the selected book.
+    pub fn set_status(&mut self, status: ReadStatus) {
+        if let Some(book) = self.selected_book() {
+            let id = book.id;
+            let cards_dir = self.config.cards_dir();
+            if let Ok(mut card) = omniscope_core::storage::json_cards::load_card_by_id(&cards_dir, &id) {
+                self.push_undo(
+                    format!("Set status for: {}", card.metadata.title),
+                    omniscope_core::undo::UndoAction::UpsertCards(vec![card.clone()]),
+                );
+                card.organization.read_status = status.clone();
+                card.updated_at = chrono::Utc::now();
+                let _ = omniscope_core::storage::json_cards::save_card(&cards_dir, &card);
+                if let Some(ref db) = self.db {
+                    let _ = db.upsert_book(&card);
+                }
+                self.status_message = format!("Status: {status}");
+                self.refresh_books();
+            }
+        }
+    }
+
     /// Open tags editor popup.
     pub fn open_edit_tags(&mut self) {
         if let Some(book) = self.selected_book() {
@@ -227,13 +249,20 @@ impl App {
         if let Some(book) = self.selected_book() {
             let id = book.id;
             let cards_dir = self.config.cards_dir();
-            if let Ok(card) = omniscope_core::storage::json_cards::load_card_by_id(&cards_dir, &id) {
-                match omniscope_core::viewer::open_book(&card, &self.config) {
-                    Ok(()) => self.status_message = format!("Opened: {}", card.metadata.title),
-                    Err(e) => self.status_message = format!("Open error: {e}"),
+            match omniscope_core::storage::json_cards::load_card_by_id(&cards_dir, &id) {
+                Ok(card) => {
+                    if card.file.is_none() {
+                        self.status_message = "No file attached to this book".to_string();
+                        return;
+                    }
+                    match omniscope_core::viewer::open_book(&card, &self.config) {
+                        Ok(()) => self.status_message = format!("Opened: {}", card.metadata.title),
+                        Err(e) => self.status_message = format!("Open error: {e}"),
+                    }
                 }
-            } else {
-                self.status_message = "Book has no file attached".to_string();
+                Err(e) => {
+                    self.status_message = format!("Failed to load card: {e}");
+                }
             }
         }
     }
@@ -267,6 +296,112 @@ impl App {
     /// Open help popup.
     pub fn show_help(&mut self) {
         self.popup = Some(Popup::Help);
+    }
+
+    /// Submit edited year from EditYear popup.
+    pub fn submit_edit_year(&mut self, book_id: &str, year_str: &str) {
+        let cards_dir = self.config.cards_dir();
+        if let Ok(uuid) = uuid::Uuid::parse_str(book_id) {
+            if let Ok(mut card) = omniscope_core::storage::json_cards::load_card_by_id(&cards_dir, &uuid) {
+                self.push_undo(
+                    format!("Edited year for: {}", card.metadata.title),
+                    omniscope_core::undo::UndoAction::UpsertCards(vec![card.clone()]),
+                );
+                card.metadata.year = year_str.trim().parse::<i32>().ok();
+                card.updated_at = chrono::Utc::now();
+                let _ = omniscope_core::storage::json_cards::save_card(&cards_dir, &card);
+                if let Some(ref db) = self.db {
+                    let _ = db.upsert_book(&card);
+                }
+                self.status_message = format!("Year: {}", year_str.trim());
+            }
+        }
+        self.popup = None;
+        self.refresh_books();
+    }
+
+    /// Submit edited authors from EditAuthors popup.
+    pub fn submit_edit_authors(&mut self, book_id: &str, authors_str: &str) {
+        let cards_dir = self.config.cards_dir();
+        if let Ok(uuid) = uuid::Uuid::parse_str(book_id) {
+            if let Ok(mut card) = omniscope_core::storage::json_cards::load_card_by_id(&cards_dir, &uuid) {
+                self.push_undo(
+                    format!("Edited authors for: {}", card.metadata.title),
+                    omniscope_core::undo::UndoAction::UpsertCards(vec![card.clone()]),
+                );
+                card.metadata.authors = authors_str
+                    .split(',')
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                card.updated_at = chrono::Utc::now();
+                let _ = omniscope_core::storage::json_cards::save_card(&cards_dir, &card);
+                if let Some(ref db) = self.db {
+                    let _ = db.upsert_book(&card);
+                }
+                self.status_message = format!("Authors: {}", authors_str.trim());
+            }
+        }
+        self.popup = None;
+        self.refresh_books();
+    }
+
+    /// Add a tag to multiple books by index.
+    pub fn add_tag_to_indices(&mut self, indices: &[usize], tag: &str) {
+        let tag = tag.trim().to_string();
+        if tag.is_empty() { return; }
+        let cards_dir = self.config.cards_dir();
+        let mut count = 0;
+        for &i in indices {
+            if let Some(book) = self.books.get(i) {
+                if let Ok(mut card) = omniscope_core::storage::json_cards::load_card_by_id(&cards_dir, &book.id) {
+                    if !card.organization.tags.contains(&tag) {
+                        self.push_undo(
+                            format!("Added tag '{}' to: {}", tag, card.metadata.title),
+                            omniscope_core::undo::UndoAction::UpsertCards(vec![card.clone()]),
+                        );
+                        card.organization.tags.push(tag.clone());
+                        card.updated_at = chrono::Utc::now();
+                        let _ = omniscope_core::storage::json_cards::save_card(&cards_dir, &card);
+                        if let Some(ref db) = self.db {
+                            let _ = db.upsert_book(&card);
+                        }
+                        count += 1;
+                    }
+                }
+            }
+        }
+        self.status_message = format!("Added tag '{}' to {} books", tag, count);
+        self.refresh_books();
+    }
+
+    /// Remove a tag from multiple books by index.
+    pub fn remove_tag_from_indices(&mut self, indices: &[usize], tag: &str) {
+        let tag = tag.trim().to_string();
+        if tag.is_empty() { return; }
+        let cards_dir = self.config.cards_dir();
+        let mut count = 0;
+        for &i in indices {
+            if let Some(book) = self.books.get(i) {
+                if let Ok(mut card) = omniscope_core::storage::json_cards::load_card_by_id(&cards_dir, &book.id) {
+                    if let Some(pos) = card.organization.tags.iter().position(|t| t == &tag) {
+                        self.push_undo(
+                            format!("Removed tag '{}' from: {}", tag, card.metadata.title),
+                            omniscope_core::undo::UndoAction::UpsertCards(vec![card.clone()]),
+                        );
+                        card.organization.tags.remove(pos);
+                        card.updated_at = chrono::Utc::now();
+                        let _ = omniscope_core::storage::json_cards::save_card(&cards_dir, &card);
+                        if let Some(ref db) = self.db {
+                            let _ = db.upsert_book(&card);
+                        }
+                        count += 1;
+                    }
+                }
+            }
+        }
+        self.status_message = format!("Removed tag '{}' from {} books", tag, count);
+        self.refresh_books();
     }
 
     /// Perform fuzzy search on current query.
