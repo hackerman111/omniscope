@@ -1,7 +1,7 @@
-pub(crate) mod panels;
-pub(crate) mod popups;
 pub(crate) mod layout;
 pub(crate) mod overlays;
+pub(crate) mod panels;
+pub(crate) mod popups;
 
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
@@ -39,7 +39,7 @@ pub fn render(frame: &mut Frame, app: &App) {
 
     panels::render_body(frame, app, main_layout[0]);
     panels::statusbar::render(frame, app, main_layout[1]);
-    
+
     if show_cmdline {
         panels::cmdline::render(frame, app, main_layout[2]);
     }
@@ -48,58 +48,78 @@ pub fn render(frame: &mut Frame, app: &App) {
     if let Some(ref popup) = app.popup {
         popups::render_popup(frame, app, popup, size);
     }
-    
+
     // Key Hints overlay (contextual)
-    let show_hints = app.pending_key.is_some() 
-        || app.pending_operator.is_some() 
-        || app.mode == Mode::Visual || app.mode == Mode::VisualLine || app.mode == Mode::VisualBlock
+    let show_hints = app.pending_key.is_some()
+        || app.pending_operator.is_some()
+        || app.mode == Mode::Visual
+        || app.mode == Mode::VisualLine
+        || app.mode == Mode::VisualBlock
         || app.pending_register_select;
 
     if show_hints {
-         render_key_hints(frame, app, size);
+        render_key_hints(frame, app, size);
     }
 }
 
 fn render_key_hints(frame: &mut Frame, app: &App, area: Rect) {
     use crate::keys::ui::hints::get_hints;
     let hints = get_hints(app);
-    if hints.is_empty() { return; }
-    
-    // Calculate height needed (1 row per suggestion? or grid?)
-    // Let's do a simple grid or flow.
-    // For now, let's do a bottom bar.
-    let height = (hints.len() as u16 / 4) + 2; // Rough estimate
-    let height = height.clamp(3, 10);
-    
+    if hints.is_empty() {
+        return;
+    }
+
+    // Compact single-row hints, positioned above status bar
+    let height = 2u16;
+    let statusbar_height = 1u16;
+    let cmdline_height = if app.mode == Mode::Command || app.mode == Mode::Search {
+        1u16
+    } else {
+        0u16
+    };
+
     let hint_area = Rect {
         x: area.x,
-        y: area.height.saturating_sub(height),
+        y: area
+            .height
+            .saturating_sub(height + statusbar_height + cmdline_height),
         width: area.width,
         height,
     };
-    
-    // Clear area to avoid transparency issues
+
     frame.render_widget(ratatui::widgets::Clear, hint_area);
-    
+
     let block = ratatui::widgets::Block::default()
         .borders(ratatui::widgets::Borders::TOP)
+        .border_style(
+            Style::default()
+                .fg(app.theme.border())
+                .add_modifier(Modifier::DIM),
+        )
         .style(Style::default().bg(app.theme.bg()));
-        
+
     let inner_area = block.inner(hint_area);
     frame.render_widget(block, hint_area);
-    
-    // Render hints
-    // Format: " k: desc  k: desc "
+
+    // Render hints in compact format
     let mut spans = Vec::new();
     for hint in hints {
-        spans.push(Span::styled(format!(" {} ", hint.key), Style::default().fg(app.theme.purple()).add_modifier(Modifier::BOLD)));
-        spans.push(Span::styled(format!("{}  ", hint.desc), Style::default().fg(app.theme.fg())));
+        spans.push(Span::styled(
+            format!(" {}:", hint.key),
+            Style::default()
+                .fg(app.theme.yellow())
+                .add_modifier(Modifier::BOLD),
+        ));
+        spans.push(Span::styled(
+            format!("{}  ", hint.desc),
+            Style::default().fg(app.theme.muted()),
+        ));
     }
-    
+
     let paragraph = Paragraph::new(Line::from(spans))
         .wrap(ratatui::widgets::Wrap { trim: true })
         .style(Style::default().bg(app.theme.bg()));
-        
+
     frame.render_widget(paragraph, inner_area);
 }
 

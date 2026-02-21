@@ -120,12 +120,7 @@ pub fn scaffold_template(
             None
         };
 
-        let _id = db.create_folder_with_path(
-            folder_name,
-            parent_id.as_deref(),
-            None,
-            rel_path,
-        )?;
+        let _id = db.create_folder_with_path(folder_name, parent_id.as_deref(), None, rel_path)?;
 
         created.push(rel_path.to_string());
     }
@@ -202,7 +197,7 @@ pub fn sync_folders(library: &LibraryRoot, db: &Database) -> Result<SyncReport> 
     }
 
     let disk_set: HashSet<&str> = disk_folders.iter().map(|s| s.as_str()).collect();
-    for db_folder in &db_set {
+    for db_folder in db_set.iter() {
         if !disk_set.contains(db_folder.as_str()) {
             report.missing_on_disk.push(db_folder.clone());
         }
@@ -308,8 +303,14 @@ mod tests {
 
     #[test]
     fn test_folder_template_from_str() {
-        assert_eq!(FolderTemplate::from_str("research"), Some(FolderTemplate::Research));
-        assert_eq!(FolderTemplate::from_str("PERSONAL"), Some(FolderTemplate::Personal));
+        assert_eq!(
+            FolderTemplate::from_str("research"),
+            Some(FolderTemplate::Research)
+        );
+        assert_eq!(
+            FolderTemplate::from_str("PERSONAL"),
+            Some(FolderTemplate::Personal)
+        );
         assert_eq!(FolderTemplate::from_str("unknown"), None);
     }
 

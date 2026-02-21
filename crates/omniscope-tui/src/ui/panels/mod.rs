@@ -1,14 +1,14 @@
-pub mod left;
-pub mod center;
-pub mod right;
-pub mod quickfix;
-pub mod statusbar;
-pub mod cmdline;
 pub mod ai_panel;
+pub mod center;
+pub mod cmdline;
+pub mod left;
+pub mod quickfix;
+pub mod right;
+pub mod statusbar;
 
+use crate::app::App;
 use ratatui::layout::Rect;
 use ratatui::Frame;
-use crate::app::App;
 
 pub fn render_body(frame: &mut Frame, app: &App, area: Rect) {
     let body_area = if app.quickfix_show {
@@ -30,10 +30,10 @@ pub fn render_body(frame: &mut Frame, app: &App, area: Rect) {
     if !left_area.is_empty() {
         left::render(frame, app, left_area);
     }
-    
+
     // Center is always rendered per Rule 2 adaptivity
     center::render(frame, app, center_area);
-    
+
     if !right_area.is_empty() {
         ai_panel::render(frame, app, right_area);
     }

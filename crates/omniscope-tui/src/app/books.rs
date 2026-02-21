@@ -56,19 +56,33 @@ impl App {
             // File path
             let file_path = form.fields[5].value.trim().to_string();
             if !file_path.is_empty() {
-                if let Ok(imported) = omniscope_core::file_import::import_file(std::path::Path::new(&file_path)) {
+                if let Ok(imported) =
+                    omniscope_core::file_import::import_file(std::path::Path::new(&file_path))
+                {
                     card.file = imported.file;
                 }
             }
 
             // Save to undo stack before creating
             self.push_undo(
-                 format!("Added book: {}", card.metadata.title),
-                 omniscope_core::undo::UndoAction::UpsertCards(vec![card.clone()])
+                format!("Added book: {}", card.metadata.title),
+                omniscope_core::undo::UndoAction::UpsertCards(vec![card.clone()]),
             );
 
+            // Check for duplicate title and add suffix if needed
+            let base_title = card.metadata.title.clone();
+            let mut suffix = 0;
+            while self
+                .all_books
+                .iter()
+                .any(|b| b.title == card.metadata.title)
+            {
+                suffix += 1;
+                card.metadata.title = format!("{}_{}", base_title, suffix);
+            }
+
             // Save
-            let cards_dir = self.config.cards_dir();
+            let cards_dir = self.cards_dir();
             if let Err(e) = omniscope_core::storage::json_cards::save_card(&cards_dir, &card) {
                 self.status_message = format!("Save error: {e}");
                 return;
@@ -104,11 +118,13 @@ impl App {
 
             // Check old state for undo
             if let Ok(uuid) = uuid::Uuid::parse_str(&id) {
-                if let Ok(old_card) = omniscope_core::storage::json_cards::load_card_by_id(&self.config.cards_dir(), &uuid) {
-                     self.push_undo(
-                          format!("Deleted: {title}"),
-                          omniscope_core::undo::UndoAction::DeleteCards(vec![old_card])
-                     );
+                if let Ok(old_card) =
+                    omniscope_core::storage::json_cards::load_card_by_id(&self.cards_dir(), &uuid)
+                {
+                    self.push_undo(
+                        format!("Deleted: {title}"),
+                        omniscope_core::undo::UndoAction::DeleteCards(vec![old_card]),
+                    );
                 }
             }
 
@@ -119,7 +135,7 @@ impl App {
 
             // Delete JSON card
             if let Ok(uuid) = uuid::Uuid::parse_str(&id) {
-                let _ = omniscope_core::storage::json_cards::delete_card(&self.config.cards_dir(), &uuid);
+                let _ = omniscope_core::storage::json_cards::delete_card(&self.cards_dir(), &uuid);
             }
 
             self.status_message = format!("Deleted: {title}");
@@ -132,15 +148,17 @@ impl App {
     pub fn set_rating(&mut self, rating: u8) {
         if let Some(book) = self.selected_book() {
             let id = book.id;
-            let cards_dir = self.config.cards_dir();
+            let cards_dir = self.cards_dir();
 
             // Load full card, update, save
-            if let Ok(mut card) = omniscope_core::storage::json_cards::load_card_by_id(&cards_dir, &id) {
+            if let Ok(mut card) =
+                omniscope_core::storage::json_cards::load_card_by_id(&cards_dir, &id)
+            {
                 self.push_undo(
-                     format!("Set rating for: {}", card.metadata.title),
-                     omniscope_core::undo::UndoAction::UpsertCards(vec![card.clone()])
+                    format!("Set rating for: {}", card.metadata.title),
+                    omniscope_core::undo::UndoAction::UpsertCards(vec![card.clone()]),
                 );
-                
+
                 card.organization.rating = Some(rating);
                 card.updated_at = chrono::Utc::now();
                 let _ = omniscope_core::storage::json_cards::save_card(&cards_dir, &card);
@@ -164,13 +182,15 @@ impl App {
                 ReadStatus::Dnf => ReadStatus::Unread,
             };
 
-            let cards_dir = self.config.cards_dir();
-            if let Ok(mut card) = omniscope_core::storage::json_cards::load_card_by_id(&cards_dir, &id) {
+            let cards_dir = self.cards_dir();
+            if let Ok(mut card) =
+                omniscope_core::storage::json_cards::load_card_by_id(&cards_dir, &id)
+            {
                 self.push_undo(
-                     format!("Cycled status for: {}", card.metadata.title),
-                     omniscope_core::undo::UndoAction::UpsertCards(vec![card.clone()])
+                    format!("Cycled status for: {}", card.metadata.title),
+                    omniscope_core::undo::UndoAction::UpsertCards(vec![card.clone()]),
                 );
-                
+
                 card.organization.read_status = new_status;
                 card.updated_at = chrono::Utc::now();
                 let _ = omniscope_core::storage::json_cards::save_card(&cards_dir, &card);
@@ -187,8 +207,10 @@ impl App {
     pub fn set_status(&mut self, status: ReadStatus) {
         if let Some(book) = self.selected_book() {
             let id = book.id;
-            let cards_dir = self.config.cards_dir();
-            if let Ok(mut card) = omniscope_core::storage::json_cards::load_card_by_id(&cards_dir, &id) {
+            let cards_dir = self.cards_dir();
+            if let Ok(mut card) =
+                omniscope_core::storage::json_cards::load_card_by_id(&cards_dir, &id)
+            {
                 self.push_undo(
                     format!("Set status for: {}", card.metadata.title),
                     omniscope_core::undo::UndoAction::UpsertCards(vec![card.clone()]),
@@ -221,14 +243,16 @@ impl App {
             let id = form.book_id.clone();
             let tags = form.tags.clone();
 
-            let cards_dir = self.config.cards_dir();
+            let cards_dir = self.cards_dir();
             if let Ok(uuid) = uuid::Uuid::parse_str(&id) {
-                if let Ok(mut card) = omniscope_core::storage::json_cards::load_card_by_id(&cards_dir, &uuid) {
+                if let Ok(mut card) =
+                    omniscope_core::storage::json_cards::load_card_by_id(&cards_dir, &uuid)
+                {
                     self.push_undo(
-                         format!("Edited tags for: {}", card.metadata.title),
-                         omniscope_core::undo::UndoAction::UpsertCards(vec![card.clone()])
+                        format!("Edited tags for: {}", card.metadata.title),
+                        omniscope_core::undo::UndoAction::UpsertCards(vec![card.clone()]),
                     );
-                    
+
                     card.organization.tags = tags.clone();
                     card.updated_at = chrono::Utc::now();
                     let _ = omniscope_core::storage::json_cards::save_card(&cards_dir, &card);
@@ -248,7 +272,7 @@ impl App {
     pub fn open_selected_book(&mut self) {
         if let Some(book) = self.selected_book() {
             let id = book.id;
-            let cards_dir = self.config.cards_dir();
+            let cards_dir = self.cards_dir();
             match omniscope_core::storage::json_cards::load_card_by_id(&cards_dir, &id) {
                 Ok(card) => {
                     if card.file.is_none() {
@@ -272,8 +296,10 @@ impl App {
         if let Some(book) = self.selected_book() {
             if book.has_file {
                 let id = book.id;
-                let cards_dir = self.config.cards_dir();
-                if let Ok(card) = omniscope_core::storage::json_cards::load_card_by_id(&cards_dir, &id) {
+                let cards_dir = self.cards_dir();
+                if let Ok(card) =
+                    omniscope_core::storage::json_cards::load_card_by_id(&cards_dir, &id)
+                {
                     if let Some(ref file) = card.file {
                         self.status_message = format!("Yanked: {}", file.path);
                         return;
@@ -286,7 +312,11 @@ impl App {
 
     /// Toggle visual selection on current item.
     pub fn toggle_visual_select(&mut self) {
-        if let Some(idx) = self.visual_selections.iter().position(|&i| i == self.selected_index) {
+        if let Some(idx) = self
+            .visual_selections
+            .iter()
+            .position(|&i| i == self.selected_index)
+        {
             self.visual_selections.remove(idx);
         } else {
             self.visual_selections.push(self.selected_index);
@@ -300,9 +330,11 @@ impl App {
 
     /// Submit edited year from EditYear popup.
     pub fn submit_edit_year(&mut self, book_id: &str, year_str: &str) {
-        let cards_dir = self.config.cards_dir();
+        let cards_dir = self.cards_dir();
         if let Ok(uuid) = uuid::Uuid::parse_str(book_id) {
-            if let Ok(mut card) = omniscope_core::storage::json_cards::load_card_by_id(&cards_dir, &uuid) {
+            if let Ok(mut card) =
+                omniscope_core::storage::json_cards::load_card_by_id(&cards_dir, &uuid)
+            {
                 self.push_undo(
                     format!("Edited year for: {}", card.metadata.title),
                     omniscope_core::undo::UndoAction::UpsertCards(vec![card.clone()]),
@@ -322,9 +354,11 @@ impl App {
 
     /// Submit edited authors from EditAuthors popup.
     pub fn submit_edit_authors(&mut self, book_id: &str, authors_str: &str) {
-        let cards_dir = self.config.cards_dir();
+        let cards_dir = self.cards_dir();
         if let Ok(uuid) = uuid::Uuid::parse_str(book_id) {
-            if let Ok(mut card) = omniscope_core::storage::json_cards::load_card_by_id(&cards_dir, &uuid) {
+            if let Ok(mut card) =
+                omniscope_core::storage::json_cards::load_card_by_id(&cards_dir, &uuid)
+            {
                 self.push_undo(
                     format!("Edited authors for: {}", card.metadata.title),
                     omniscope_core::undo::UndoAction::UpsertCards(vec![card.clone()]),
@@ -349,12 +383,16 @@ impl App {
     /// Add a tag to multiple books by index.
     pub fn add_tag_to_indices(&mut self, indices: &[usize], tag: &str) {
         let tag = tag.trim().to_string();
-        if tag.is_empty() { return; }
-        let cards_dir = self.config.cards_dir();
+        if tag.is_empty() {
+            return;
+        }
+        let cards_dir = self.cards_dir();
         let mut count = 0;
         for &i in indices {
             if let Some(book) = self.books.get(i) {
-                if let Ok(mut card) = omniscope_core::storage::json_cards::load_card_by_id(&cards_dir, &book.id) {
+                if let Ok(mut card) =
+                    omniscope_core::storage::json_cards::load_card_by_id(&cards_dir, &book.id)
+                {
                     if !card.organization.tags.contains(&tag) {
                         self.push_undo(
                             format!("Added tag '{}' to: {}", tag, card.metadata.title),
@@ -378,12 +416,16 @@ impl App {
     /// Remove a tag from multiple books by index.
     pub fn remove_tag_from_indices(&mut self, indices: &[usize], tag: &str) {
         let tag = tag.trim().to_string();
-        if tag.is_empty() { return; }
-        let cards_dir = self.config.cards_dir();
+        if tag.is_empty() {
+            return;
+        }
+        let cards_dir = self.cards_dir();
         let mut count = 0;
         for &i in indices {
             if let Some(book) = self.books.get(i) {
-                if let Ok(mut card) = omniscope_core::storage::json_cards::load_card_by_id(&cards_dir, &book.id) {
+                if let Ok(mut card) =
+                    omniscope_core::storage::json_cards::load_card_by_id(&cards_dir, &book.id)
+                {
                     if let Some(pos) = card.organization.tags.iter().position(|t| t == &tag) {
                         self.push_undo(
                             format!("Removed tag '{}' from: {}", tag, card.metadata.title),
@@ -450,7 +492,10 @@ impl App {
 
         // Authors: match on @author: OR just @ OR if token matches an author name
         if token.is_empty() || token.starts_with('@') || token.len() > 1 {
-            let prefix = token.strip_prefix("@author:").or_else(|| token.strip_prefix('@')).unwrap_or(token);
+            let prefix = token
+                .strip_prefix("@author:")
+                .or_else(|| token.strip_prefix('@'))
+                .unwrap_or(token);
             if let Some(ref db) = self.db {
                 if let Ok(authors) = db.get_all_authors() {
                     for a in authors {
@@ -468,7 +513,8 @@ impl App {
             if let Some(ref db) = self.db {
                 if let Ok(tags) = db.list_tags() {
                     for (name, _count) in tags {
-                        if prefix.is_empty() || name.to_lowercase().contains(&prefix.to_lowercase()) {
+                        if prefix.is_empty() || name.to_lowercase().contains(&prefix.to_lowercase())
+                        {
                             candidates.push(format!("#{name}"));
                         }
                     }
@@ -487,7 +533,9 @@ impl App {
 
         let parsed = SearchQuery::parse(query);
 
-        let mut filtered: Vec<_> = self.all_books.iter()
+        let mut filtered: Vec<_> = self
+            .all_books
+            .iter()
             .filter(|b| parsed.matches(b))
             .cloned()
             .collect();
@@ -498,8 +546,10 @@ impl App {
             filtered = results.into_iter().map(|r| r.book).collect();
         }
 
-        let chips: Vec<String> = parsed.filters.iter().map(|f| {
-            match f {
+        let chips: Vec<String> = parsed
+            .filters
+            .iter()
+            .map(|f| match f {
                 omniscope_core::search_dsl::SearchFilter::Author(a) => format!("@{a}"),
                 omniscope_core::search_dsl::SearchFilter::Tag(t) => format!("#{t}"),
                 omniscope_core::search_dsl::SearchFilter::NotTag(t) => format!("!#{t}"),
@@ -521,8 +571,8 @@ impl App {
                 omniscope_core::search_dsl::SearchFilter::HasSummary => "has:summary".to_string(),
                 omniscope_core::search_dsl::SearchFilter::HasTags => "has:tags".to_string(),
                 omniscope_core::search_dsl::SearchFilter::Not(_inner) => "NOT ...".to_string(),
-            }
-        }).collect();
+            })
+            .collect();
 
         if let Some(Popup::Telescope(ref mut state)) = self.popup {
             state.results = filtered;

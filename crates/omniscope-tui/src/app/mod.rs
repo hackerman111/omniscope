@@ -3,12 +3,14 @@ mod navigation;
 mod sidebar;
 mod vim;
 
-use omniscope_core::{AppConfig, BookCard, BookSummaryView, Database, FuzzySearcher, LibraryRoot, undo::UndoEntry};
-use crate::popup::Popup;
 use crate::keys::core::operator::Operator;
 use crate::keys::ext::jump_list::JumpList;
 use crate::keys::ui::macro_recorder::MacroRecorder;
+use crate::popup::Popup;
 use crate::theme::NordTheme;
+use omniscope_core::{
+    undo::UndoEntry, AppConfig, BookCard, BookSummaryView, Database, FuzzySearcher, LibraryRoot,
+};
 
 /// Search direction for `/` and `?` searches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -33,11 +35,11 @@ pub enum Mode {
 impl std::fmt::Display for Mode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Normal  => write!(f, "NORMAL"),
-            Self::Insert  => write!(f, "INSERT"),
-            Self::Search  => write!(f, "SEARCH"),
+            Self::Normal => write!(f, "NORMAL"),
+            Self::Insert => write!(f, "INSERT"),
+            Self::Search => write!(f, "SEARCH"),
             Self::Command => write!(f, "COMMAND"),
-            Self::Visual  => write!(f, "VISUAL"),
+            Self::Visual => write!(f, "VISUAL"),
             Self::VisualLine => write!(f, "VISUAL-LINE"),
             Self::VisualBlock => write!(f, "VISUAL-BLOCK"),
             Self::Pending => write!(f, "PENDING"),
@@ -75,6 +77,7 @@ pub enum SidebarFilter {
     All,
     Library(String),
     Tag(String),
+    Folder(String),
 }
 
 /// Sort order for the book list.
@@ -93,29 +96,27 @@ pub enum SortKey {
 impl SortKey {
     pub fn next(self) -> Self {
         match self {
-            Self::UpdatedDesc  => Self::UpdatedAsc,
-            Self::UpdatedAsc   => Self::TitleAsc,
-            Self::TitleAsc     => Self::YearDesc,
-            Self::YearDesc     => Self::YearAsc,
-            Self::YearAsc      => Self::RatingDesc,
-            Self::RatingDesc   => Self::FrecencyDesc,
+            Self::UpdatedDesc => Self::UpdatedAsc,
+            Self::UpdatedAsc => Self::TitleAsc,
+            Self::TitleAsc => Self::YearDesc,
+            Self::YearDesc => Self::YearAsc,
+            Self::YearAsc => Self::RatingDesc,
+            Self::RatingDesc => Self::FrecencyDesc,
             Self::FrecencyDesc => Self::UpdatedDesc,
         }
     }
     pub fn label(self) -> &'static str {
         match self {
-            Self::UpdatedDesc  => "updated ▼",
-            Self::UpdatedAsc   => "updated ▲",
-            Self::TitleAsc     => "title A–Z",
-            Self::YearDesc     => "year ▼",
-            Self::YearAsc      => "year ▲",
-            Self::RatingDesc   => "rating ▼",
+            Self::UpdatedDesc => "updated ▼",
+            Self::UpdatedAsc => "updated ▲",
+            Self::TitleAsc => "title A–Z",
+            Self::YearDesc => "year ▼",
+            Self::YearAsc => "year ▲",
+            Self::RatingDesc => "rating ▼",
             Self::FrecencyDesc => "frecency ▼",
         }
     }
 }
-
-
 
 /// Items displayed in the sidebar.
 #[derive(Debug, Clone)]
@@ -180,7 +181,6 @@ pub struct App {
     pub library_root: Option<LibraryRoot>,
 
     // ─── Phase 1: Vim extras ────────────────────────────────
-
     /// Accumulated numeric count prefix for motions (e.g. `5j`).
     pub vim_count: u32,
 
@@ -213,7 +213,6 @@ pub struct App {
     pub sort_key: SortKey,
 
     // ─── Phase 1: Quickfix ──────────────────────────────────
-
     /// Quickfix list of books for batch operations.
     pub quickfix_list: Vec<BookSummaryView>,
     /// Whether the quickfix panel is currently visible.
@@ -228,7 +227,6 @@ pub struct App {
     pub has_explicit_count: bool,
 
     // ─── Phase 2: Viewport & Navigation ─────────────────────
-
     /// Manual viewport scroll offset (for zz/zt/zb and Ctrl+e/y).
     pub viewport_offset: usize,
 
@@ -239,7 +237,6 @@ pub struct App {
     pub last_visual_range: Option<(usize, usize)>,
 
     // ─── Phase 2: Search ────────────────────────────────────
-
     /// Last search query for `n`/`N` repeat.
     pub last_search: Option<String>,
 
@@ -247,15 +244,19 @@ pub struct App {
     pub search_direction: SearchDirection,
 
     // ─── Phase 2: Command History ───────────────────────────
-
     /// History of executed commands.
     pub command_history: Vec<String>,
 
     /// Current position in command history navigation.
     pub command_history_idx: Option<usize>,
 
-    // ─── Phase 2: Macros ────────────────────────────────────
+    /// Command autocomplete suggestions.
+    pub command_suggestions: Vec<String>,
 
+    /// Currently selected suggestion index.
+    pub command_suggestion_idx: Option<usize>,
+
+    // ─── Phase 2: Macros ────────────────────────────────────
     /// Macro recorder for q/@ commands.
     pub macro_recorder: MacroRecorder,
 
@@ -357,6 +358,8 @@ impl App {
             search_direction: SearchDirection::Forward,
             command_history: Vec::new(),
             command_history_idx: None,
+            command_suggestions: Vec::new(),
+            command_suggestion_idx: None,
             macro_recorder: MacroRecorder::new(),
             ai_panel_active: false,
             ai_input: String::new(),

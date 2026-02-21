@@ -1,11 +1,23 @@
-pub mod ai_types;
+pub mod actions;
 pub mod book;
+pub mod citation;
+pub mod folder;
+pub mod identifiers;
 pub mod library;
+pub mod library_map;
 pub mod manifest;
+pub mod publication;
 pub mod tag;
+pub mod user_profile;
 
-pub use ai_types::*;
+pub use actions::*;
 pub use book::*;
+pub use citation::*;
+pub use folder::*;
+pub use identifiers::*;
 pub use library::*;
+pub use library_map::*;
 pub use manifest::*;
+pub use publication::*;
 pub use tag::*;
+pub use user_profile::*;

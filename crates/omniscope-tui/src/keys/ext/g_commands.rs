@@ -1,22 +1,22 @@
-use crossterm::event::KeyCode;
 use crate::app::{App, Mode};
-use crate::popup::Popup;
 use crate::keys::core::motions;
+use crate::popup::Popup;
+use crossterm::event::KeyCode;
 
 pub fn handle_g_command(app: &mut App, code: KeyCode) {
     match code {
         // gg — go to top
         KeyCode::Char('g') => {
-             app.record_jump();
-             if app.active_panel == crate::app::ActivePanel::Sidebar {
-                 app.move_to_top();
-             } else {
-                 let count = app.count_or_one();
-                 app.reset_vim_count();
-                 if let Some(t) = motions::get_nav_target(app, 'g', count) {
-                     app.selected_index = t;
-                 }
-             }
+            app.record_jump();
+            if app.active_panel == crate::app::ActivePanel::Sidebar {
+                app.move_to_top();
+            } else {
+                let count = app.count_or_one();
+                app.reset_vim_count();
+                if let Some(t) = motions::get_nav_target(app, 'g', count) {
+                    app.selected_index = t;
+                }
+            }
         }
         // gt — quick-edit title
         KeyCode::Char('t') => {
@@ -37,7 +37,7 @@ pub fn handle_g_command(app: &mut App, code: KeyCode) {
             app.sidebar_selected = 0;
             app.status_message = "Go Root (All Books)".to_string();
         }
-        
+
         // gh — Go Home (All Books)
         KeyCode::Char('h') => {
             app.record_jump();
@@ -45,28 +45,30 @@ pub fn handle_g_command(app: &mut App, code: KeyCode) {
             app.refresh_books();
             app.status_message = "Go Home (All Books)".to_string();
         }
-        
+
         // gp — Go Parent (up one level in hierarchy)
         KeyCode::Char('p') => {
             app.record_jump();
             if let crate::app::SidebarFilter::All = app.sidebar_filter {
-                 // Already at top
-                 app.status_message = "Already at root".to_string();
+                // Already at top
+                app.status_message = "Already at root".to_string();
             } else {
-                 app.sidebar_filter = crate::app::SidebarFilter::All;
-                 app.refresh_books();
-                 app.status_message = "Go Parent".to_string();
+                app.sidebar_filter = crate::app::SidebarFilter::All;
+                app.refresh_books();
+                app.status_message = "Go Parent".to_string();
             }
         }
 
         // gs — cycle status
-        KeyCode::Char('s') => { app.cycle_status(); }
-        
+        KeyCode::Char('s') => {
+            app.cycle_status();
+        }
+
         // gl — go to last position (same as Ctrl+o)
         KeyCode::Char('l') => {
             app.jump_back();
         }
-        
+
         // gf — open file in OS (open book's file)
         KeyCode::Char('f') => {
             app.open_selected_book();
@@ -76,7 +78,7 @@ pub fn handle_g_command(app: &mut App, code: KeyCode) {
         KeyCode::Char('I') => {
             if let Some(book) = app.selected_book() {
                 let id = book.id;
-                let cards_dir = app.config.cards_dir();
+                let cards_dir = app.cards_dir();
                 let card_path = cards_dir.join(format!("{}.json", id));
                 if card_path.exists() {
                     app.pending_editor_path = Some(card_path.to_string_lossy().to_string());
@@ -97,7 +99,8 @@ pub fn handle_g_command(app: &mut App, code: KeyCode) {
                 app.selected_index = end;
                 app.mode = Mode::Visual;
                 app.visual_selections = (start..=end).collect();
-                app.status_message = format!("-- VISUAL -- {} selected", app.visual_selections.len());
+                app.status_message =
+                    format!("-- VISUAL -- {} selected", app.visual_selections.len());
             } else {
                 app.status_message = "No previous visual selection".to_string();
             }
@@ -134,7 +137,34 @@ pub fn handle_g_command(app: &mut App, code: KeyCode) {
         KeyCode::Char('b') => {
             app.open_telescope();
         }
-        
+
+        // gF — goto Folder: filter by folder path
+        KeyCode::Char('F') => {
+            if app.active_panel == crate::app::ActivePanel::Sidebar {
+                if let Some(crate::app::SidebarItem::Folder { path }) =
+                    app.sidebar_items.get(app.sidebar_selected)
+                {
+                    let path = path.clone();
+                    app.filter_by_folder(&path);
+                }
+            } else if let Some(book) = app.selected_book() {
+                let id = book.id;
+                let cards_dir = app.cards_dir();
+                if let Ok(card) =
+                    omniscope_core::storage::json_cards::load_card_by_id(&cards_dir, &id)
+                {
+                    if let Some(ref file) = card.file {
+                        if let Some(parent) = std::path::Path::new(&file.path).parent() {
+                            let folder_path = parent.to_string_lossy().to_string();
+                            app.filter_by_folder(&folder_path);
+                        }
+                    } else {
+                        app.status_message = "No file attached to current book".to_string();
+                    }
+                }
+            }
+        }
+
         _ => {}
     }
 }

@@ -1,14 +1,18 @@
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
-use ratatui::widgets::{Block, Borders, List, ListItem};
 use ratatui::text::Span;
+use ratatui::widgets::{Block, Borders, List, ListItem};
 use ratatui::Frame;
 
 use crate::app::{ActivePanel, App, SidebarItem};
 
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     let is_focused = app.active_panel == ActivePanel::Sidebar;
-    let border_color = if is_focused { app.theme.active_panel() } else { app.theme.border() };
+    let border_color = if is_focused {
+        app.theme.active_panel()
+    } else {
+        app.theme.border()
+    };
 
     let block = Block::default()
         .title(" LIBRARIES ") // Updated to match Step 3
@@ -66,7 +70,9 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
             };
 
             let item_style = if is_selected {
-                style.bg(app.theme.bg_secondary()).add_modifier(Modifier::BOLD)
+                style
+                    .bg(app.theme.bg_secondary())
+                    .add_modifier(Modifier::BOLD)
             } else {
                 style
             };

@@ -16,7 +16,12 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
 
 fn render_ai_chat(frame: &mut Frame, app: &App, area: Rect) {
     let block = Block::default()
-        .title(Span::styled(" 󱤅 OMNISCOPE AI ", Style::default().fg(app.theme.purple()).add_modifier(Modifier::BOLD)))
+        .title(Span::styled(
+            " 󱤅 OMNISCOPE AI ",
+            Style::default()
+                .fg(app.theme.purple())
+                .add_modifier(Modifier::BOLD),
+        ))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.purple()))
         .style(Style::default().bg(app.theme.bg()));
@@ -42,34 +47,67 @@ fn render_ai_chat(frame: &mut Frame, app: &App, area: Rect) {
             Span::styled(&book.title, Style::default().fg(app.theme.fg())),
             Span::styled(" ─── ", Style::default().fg(app.theme.border())),
         ]);
-        frame.render_widget(Paragraph::new(title_line).alignment(ratatui::layout::Alignment::Center), chunks[0]);
+        frame.render_widget(
+            Paragraph::new(title_line).alignment(ratatui::layout::Alignment::Center),
+            chunks[0],
+        );
     }
 
     // 2. Mock Assistant response (per Step 14 example)
     let assistant_msg = vec![
-        Line::from(Span::styled(" Assistant", Style::default().fg(app.theme.muted()))),
+        Line::from(Span::styled(
+            " Assistant",
+            Style::default().fg(app.theme.muted()),
+        )),
         Line::from(vec![
             Span::styled(" ┌", Style::default().fg(app.theme.frost_blue())),
-            Span::styled("─".repeat(chunks[1].width as usize - 4), Style::default().fg(app.theme.border())),
+            Span::styled(
+                "─".repeat(chunks[1].width as usize - 4),
+                Style::default().fg(app.theme.border()),
+            ),
             Span::styled("┐", Style::default().fg(app.theme.frost_blue())),
         ]),
         Line::from(vec![
             Span::styled(" │ ", Style::default().fg(app.theme.frost_blue())),
-            Span::styled("Это фундаментальная книга по Rust...", Style::default().fg(app.theme.fg())),
+            Span::styled(
+                "Это фундаментальная книга по Rust...",
+                Style::default().fg(app.theme.fg()),
+            ),
         ]),
         Line::from(vec![
             Span::styled(" └", Style::default().fg(app.theme.frost_blue())),
-            Span::styled("─".repeat(chunks[1].width as usize - 4), Style::default().fg(app.theme.border())),
+            Span::styled(
+                "─".repeat(chunks[1].width as usize - 4),
+                Style::default().fg(app.theme.border()),
+            ),
             Span::styled("┘", Style::default().fg(app.theme.frost_blue())),
         ]),
     ];
-    frame.render_widget(Paragraph::new(assistant_msg).wrap(Wrap { trim: false }), chunks[1]);
+    frame.render_widget(
+        Paragraph::new(assistant_msg).wrap(Wrap { trim: false }),
+        chunks[1],
+    );
 
     // 3. Suggested actions
     let suggested = Line::from(vec![
-        Span::styled(" Suggested actions: ", Style::default().fg(app.theme.muted())),
-        Span::styled(" [1] ", Style::default().fg(app.theme.frost_ice()).add_modifier(Modifier::BOLD)), Span::raw("Добавить теги "),
-        Span::styled(" [2] ", Style::default().fg(app.theme.frost_ice()).add_modifier(Modifier::BOLD)), Span::raw("Интекс"),
+        Span::styled(
+            " Suggested actions: ",
+            Style::default().fg(app.theme.muted()),
+        ),
+        Span::styled(
+            " [1] ",
+            Style::default()
+                .fg(app.theme.frost_ice())
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("Добавить теги "),
+        Span::styled(
+            " [2] ",
+            Style::default()
+                .fg(app.theme.frost_ice())
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::raw("Интекс"),
     ]);
     frame.render_widget(Paragraph::new(suggested), chunks[2]);
 
@@ -83,7 +121,11 @@ fn render_ai_chat(frame: &mut Frame, app: &App, area: Rect) {
 
     // 5. Hints
     let hints = Line::from(vec![
-        Span::styled(" Ctrl+Enter ", Style::default().fg(app.theme.yellow())), Span::styled("отправить", Style::default().fg(app.theme.muted())),
+        Span::styled(" Ctrl+Enter ", Style::default().fg(app.theme.yellow())),
+        Span::styled("отправить", Style::default().fg(app.theme.muted())),
     ]);
-    frame.render_widget(Paragraph::new(hints).alignment(ratatui::layout::Alignment::Center), chunks[4]);
+    frame.render_widget(
+        Paragraph::new(hints).alignment(ratatui::layout::Alignment::Center),
+        chunks[4],
+    );
 }

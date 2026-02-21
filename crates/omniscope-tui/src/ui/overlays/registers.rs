@@ -1,7 +1,7 @@
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Clear};
+use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use ratatui::Frame;
 
 use crate::app::{App, RegisterContent};
@@ -11,7 +11,12 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Clear, overlay_area);
 
     let block = Block::default()
-        .title(Span::styled(" REGISTERS ", Style::default().fg(app.theme.frost_ice()).add_modifier(Modifier::BOLD)))
+        .title(Span::styled(
+            " REGISTERS ",
+            Style::default()
+                .fg(app.theme.frost_ice())
+                .add_modifier(Modifier::BOLD),
+        ))
         .borders(Borders::ALL)
         .border_style(Style::default().fg(app.theme.frost_ice()))
         .style(Style::default().bg(app.theme.bg()));
@@ -34,10 +39,18 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
 
         lines.push(Line::from(vec![
             Span::raw("  "),
-            Span::styled(format!("\"{c}   "), Style::default().fg(app.theme.yellow()).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                format!("\"{c}   "),
+                Style::default()
+                    .fg(app.theme.yellow())
+                    .add_modifier(Modifier::BOLD),
+            ),
             Span::styled(type_label, Style::default().fg(app.theme.frost_blue())),
             Span::raw("  "),
-            Span::styled(super::super::truncate(content, 40), Style::default().fg(app.theme.fg())),
+            Span::styled(
+                super::super::truncate(content, 40),
+                Style::default().fg(app.theme.fg()),
+            ),
         ]));
     }
 

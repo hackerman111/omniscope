@@ -4,9 +4,9 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph};
 use ratatui::Frame;
 
-use crate::popup::Popup;
 use super::centered_rect;
 use crate::app::App;
+use crate::popup::Popup;
 use crate::ui::overlays;
 
 pub(crate) fn render_popup(frame: &mut Frame, app: &App, popup: &Popup, area: Rect) {
@@ -28,7 +28,9 @@ pub(crate) fn render_popup(frame: &mut Frame, app: &App, popup: &Popup, area: Re
             for (i, field) in form.fields.iter().enumerate() {
                 let is_active = i == form.active_field;
                 let label_style = if is_active {
-                    Style::default().fg(app.theme.frost_ice()).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(app.theme.frost_ice())
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(app.theme.muted())
                 };
@@ -53,7 +55,9 @@ pub(crate) fn render_popup(frame: &mut Frame, app: &App, popup: &Popup, area: Re
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
                 "  Tab: next field  Enter: submit  Esc: cancel",
-                Style::default().fg(app.theme.muted()).add_modifier(Modifier::DIM),
+                Style::default()
+                    .fg(app.theme.muted())
+                    .add_modifier(Modifier::DIM),
             )));
 
             frame.render_widget(Paragraph::new(lines), inner);
@@ -65,15 +69,26 @@ pub(crate) fn render_popup(frame: &mut Frame, app: &App, popup: &Popup, area: Re
                 let width = (inner.width as u16).saturating_sub(15).max(20);
                 let height = form.autocomplete.visible.len().min(5) as u16 + 2;
 
-                let sug_area = Rect { x, y, width, height };
+                let sug_area = Rect {
+                    x,
+                    y,
+                    width,
+                    height,
+                };
                 frame.render_widget(Clear, sug_area);
 
-                let items: Vec<ListItem> = form.autocomplete.visible.iter()
+                let items: Vec<ListItem> = form
+                    .autocomplete
+                    .visible
+                    .iter()
                     .enumerate()
                     .map(|(i, s)| {
                         let is_sel = form.autocomplete.selected == Some(i);
                         let style = if is_sel {
-                            Style::default().bg(app.theme.green()).fg(app.theme.bg()).add_modifier(Modifier::BOLD)
+                            Style::default()
+                                .bg(app.theme.green())
+                                .fg(app.theme.bg())
+                                .add_modifier(Modifier::BOLD)
                         } else {
                             Style::default().fg(app.theme.fg())
                         };
@@ -85,7 +100,7 @@ pub(crate) fn render_popup(frame: &mut Frame, app: &App, popup: &Popup, area: Re
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(app.theme.green()))
                     .style(Style::default().bg(app.theme.bg_secondary()));
-                
+
                 frame.render_widget(List::new(items).block(block), sug_area);
             }
         }
@@ -111,12 +126,32 @@ pub(crate) fn render_popup(frame: &mut Frame, app: &App, popup: &Popup, area: Re
                 )),
                 Line::from(""),
                 Line::from(vec![
-                    Span::styled("  [y]", Style::default().fg(app.theme.red()).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        "  [y]",
+                        Style::default()
+                            .fg(app.theme.red())
+                            .add_modifier(Modifier::BOLD),
+                    ),
                     Span::styled("es  ", Style::default().fg(app.theme.muted())),
-                    Span::styled("[n]", Style::default().fg(app.theme.green()).add_modifier(Modifier::BOLD)),
+                    Span::styled(
+                        "[n]",
+                        Style::default()
+                            .fg(app.theme.green())
+                            .add_modifier(Modifier::BOLD),
+                    ),
                     Span::styled("o  ", Style::default().fg(app.theme.muted())),
-                    Span::styled("Esc", Style::default().fg(app.theme.muted()).add_modifier(Modifier::DIM)),
-                    Span::styled(": cancel", Style::default().fg(app.theme.muted()).add_modifier(Modifier::DIM)),
+                    Span::styled(
+                        "Esc",
+                        Style::default()
+                            .fg(app.theme.muted())
+                            .add_modifier(Modifier::DIM),
+                    ),
+                    Span::styled(
+                        ": cancel",
+                        Style::default()
+                            .fg(app.theme.muted())
+                            .add_modifier(Modifier::DIM),
+                    ),
                 ]),
             ];
 
@@ -159,39 +194,61 @@ pub(crate) fn render_popup(frame: &mut Frame, app: &App, popup: &Popup, area: Re
         Popup::EditTags(form) => {
             let popup_area = centered_rect(55, 30, area);
             frame.render_widget(Clear, popup_area);
-            
+
             let block = Block::default()
                 .title(" Edit Tags ")
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(app.theme.frost_blue()))
                 .style(Style::default().bg(app.theme.bg()));
-                
+
             let inner = block.inner(popup_area);
             frame.render_widget(block, popup_area);
-            
+
             let mut lines = vec![Line::from("")];
-            
+
             if form.tags.is_empty() {
-                lines.push(Line::from(Span::styled("  No tags", Style::default().fg(app.theme.muted()))));
+                lines.push(Line::from(Span::styled(
+                    "  No tags",
+                    Style::default().fg(app.theme.muted()),
+                )));
             } else {
-                let tags_display: Vec<Span> = form.tags.iter().flat_map(|t| {
-                    vec![
-                        Span::styled(format!(" #{t} "), Style::default().fg(app.theme.frost_blue()).bg(app.theme.bg_secondary())),
-                        Span::raw(" "),
-                    ]
-                }).collect();
-                lines.push(Line::from(vec![Span::raw("  ")].into_iter().chain(tags_display).collect::<Vec<_>>()));
+                let tags_display: Vec<Span> = form
+                    .tags
+                    .iter()
+                    .flat_map(|t| {
+                        vec![
+                            Span::styled(
+                                format!(" #{t} "),
+                                Style::default()
+                                    .fg(app.theme.frost_blue())
+                                    .bg(app.theme.bg_secondary()),
+                            ),
+                            Span::raw(" "),
+                        ]
+                    })
+                    .collect();
+                lines.push(Line::from(
+                    vec![Span::raw("  ")]
+                        .into_iter()
+                        .chain(tags_display)
+                        .collect::<Vec<_>>(),
+                ));
             }
-            
+
             lines.push(Line::from(""));
             lines.push(Line::from(vec![
                 Span::styled("  Add tag: ", Style::default().fg(app.theme.muted())),
-                Span::styled(format!("{}█", form.input), Style::default().fg(app.theme.fg_bright())),
+                Span::styled(
+                    format!("{}█", form.input),
+                    Style::default().fg(app.theme.fg_bright()),
+                ),
             ]));
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
                 "  Enter: add tag  Backspace: remove  Esc: cancel  Enter(empty): save",
-                Style::default().fg(app.theme.muted()).add_modifier(Modifier::DIM),
+                Style::default()
+                    .fg(app.theme.muted())
+                    .add_modifier(Modifier::DIM),
             )));
             frame.render_widget(Paragraph::new(lines), inner);
         }
@@ -241,20 +298,27 @@ pub(crate) fn render_popup(frame: &mut Frame, app: &App, popup: &Popup, area: Re
             for (key, label, status) in &statuses {
                 let is_current = current == status;
                 let style = if is_current {
-                    Style::default().fg(app.theme.frost_ice()).add_modifier(Modifier::BOLD)
+                    Style::default()
+                        .fg(app.theme.frost_ice())
+                        .add_modifier(Modifier::BOLD)
                 } else {
                     Style::default().fg(app.theme.fg())
                 };
                 let marker = if is_current { " ◀" } else { "" };
                 lines.push(Line::from(vec![
-                    Span::styled(format!("  [{key}] "), Style::default().fg(app.theme.muted())),
+                    Span::styled(
+                        format!("  [{key}] "),
+                        Style::default().fg(app.theme.muted()),
+                    ),
                     Span::styled(format!("{label}{marker}"), style),
                 ]));
             }
             lines.push(Line::from(""));
             lines.push(Line::from(Span::styled(
                 "  Space: cycle  Esc: cancel",
-                Style::default().fg(app.theme.muted()).add_modifier(Modifier::DIM),
+                Style::default()
+                    .fg(app.theme.muted())
+                    .add_modifier(Modifier::DIM),
             )));
 
             frame.render_widget(Paragraph::new(lines), inner);
@@ -266,7 +330,11 @@ pub(crate) fn render_popup(frame: &mut Frame, app: &App, popup: &Popup, area: Re
             frame.render_widget(Clear, popup_area);
 
             let block = Block::default()
-                .title(if state.pending { " EasyMotion: type first letter " } else { " EasyMotion: type label " })
+                .title(if state.pending {
+                    " EasyMotion: type first letter "
+                } else {
+                    " EasyMotion: type label "
+                })
                 .borders(Borders::ALL)
                 .border_style(Style::default().fg(app.theme.yellow()))
                 .style(Style::default().bg(app.theme.bg()));
@@ -285,28 +353,31 @@ pub(crate) fn render_popup(frame: &mut Frame, app: &App, popup: &Popup, area: Re
                 frame.render_widget(Paragraph::new(lines), inner);
             } else {
                 // Show target labels
-                let items: Vec<ListItem> = state.targets.iter().map(|&(label, idx)| {
-                    let title = app.books.get(idx)
-                        .map(|b| b.title.as_str())
-                        .unwrap_or("???");
-                    let line = Line::from(vec![
-                        Span::styled(
-                            format!(" {label} "),
-                            Style::default()
-                                .fg(app.theme.bg())
-                                .bg(app.theme.yellow())
-                                .add_modifier(Modifier::BOLD),
-                        ),
-                        Span::raw("  "),
-                        Span::styled(title, Style::default().fg(app.theme.fg())),
-                    ]);
-                    ListItem::new(line)
-                }).collect();
+                let items: Vec<ListItem> = state
+                    .targets
+                    .iter()
+                    .map(|&(label, idx)| {
+                        let title = app
+                            .books
+                            .get(idx)
+                            .map(|b| b.title.as_str())
+                            .unwrap_or("???");
+                        let line = Line::from(vec![
+                            Span::styled(
+                                format!(" {label} "),
+                                Style::default()
+                                    .fg(app.theme.bg())
+                                    .bg(app.theme.yellow())
+                                    .add_modifier(Modifier::BOLD),
+                            ),
+                            Span::raw("  "),
+                            Span::styled(title, Style::default().fg(app.theme.fg())),
+                        ]);
+                        ListItem::new(line)
+                    })
+                    .collect();
 
-                frame.render_widget(
-                    List::new(items),
-                    inner,
-                );
+                frame.render_widget(List::new(items), inner);
             }
         }
 
@@ -327,12 +398,17 @@ pub(crate) fn render_popup(frame: &mut Frame, app: &App, popup: &Popup, area: Re
                 Line::from(""),
                 Line::from(vec![
                     Span::styled("  Year: ", Style::default().fg(app.theme.muted())),
-                    Span::styled(format!("{input}█"), Style::default().fg(app.theme.fg_bright())),
+                    Span::styled(
+                        format!("{input}█"),
+                        Style::default().fg(app.theme.fg_bright()),
+                    ),
                 ]),
                 Line::from(""),
                 Line::from(Span::styled(
                     "  Enter: save  Esc: cancel",
-                    Style::default().fg(app.theme.muted()).add_modifier(Modifier::DIM),
+                    Style::default()
+                        .fg(app.theme.muted())
+                        .add_modifier(Modifier::DIM),
                 )),
             ];
             frame.render_widget(Paragraph::new(lines), inner);
@@ -355,16 +431,23 @@ pub(crate) fn render_popup(frame: &mut Frame, app: &App, popup: &Popup, area: Re
                 Line::from(""),
                 Line::from(vec![
                     Span::styled("  Authors: ", Style::default().fg(app.theme.muted())),
-                    Span::styled(format!("{input}█"), Style::default().fg(app.theme.fg_bright())),
+                    Span::styled(
+                        format!("{input}█"),
+                        Style::default().fg(app.theme.fg_bright()),
+                    ),
                 ]),
                 Line::from(Span::styled(
                     "  (comma-separated)",
-                    Style::default().fg(app.theme.muted()).add_modifier(Modifier::DIM),
+                    Style::default()
+                        .fg(app.theme.muted())
+                        .add_modifier(Modifier::DIM),
                 )),
                 Line::from(""),
                 Line::from(Span::styled(
                     "  Enter: save  Esc: cancel",
-                    Style::default().fg(app.theme.muted()).add_modifier(Modifier::DIM),
+                    Style::default()
+                        .fg(app.theme.muted())
+                        .add_modifier(Modifier::DIM),
                 )),
             ];
             frame.render_widget(Paragraph::new(lines), inner);
@@ -387,18 +470,28 @@ pub(crate) fn render_popup(frame: &mut Frame, app: &App, popup: &Popup, area: Re
                 Line::from(""),
                 Line::from(vec![
                     Span::styled("  Tag: ", Style::default().fg(app.theme.muted())),
-                    Span::styled(format!("{input}█"), Style::default().fg(app.theme.fg_bright())),
+                    Span::styled(
+                        format!("{input}█"),
+                        Style::default().fg(app.theme.fg_bright()),
+                    ),
                 ]),
                 Line::from(""),
                 Line::from(Span::styled(
                     "  Enter: add  Esc: cancel",
-                    Style::default().fg(app.theme.muted()).add_modifier(Modifier::DIM),
+                    Style::default()
+                        .fg(app.theme.muted())
+                        .add_modifier(Modifier::DIM),
                 )),
             ];
             frame.render_widget(Paragraph::new(lines), inner);
         }
 
-        Popup::RemoveTagPrompt { available_tags, selected, indices, .. } => {
+        Popup::RemoveTagPrompt {
+            available_tags,
+            selected,
+            indices,
+            ..
+        } => {
             let popup_area = centered_rect(45, 25, area);
             frame.render_widget(Clear, popup_area);
 
@@ -411,15 +504,22 @@ pub(crate) fn render_popup(frame: &mut Frame, app: &App, popup: &Popup, area: Re
             let inner = block.inner(popup_area);
             frame.render_widget(block, popup_area);
 
-            let items: Vec<ListItem> = available_tags.iter().enumerate().map(|(i, tag)| {
-                let is_sel = i == *selected;
-                let style = if is_sel {
-                    Style::default().bg(app.theme.red()).fg(app.theme.bg()).add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(app.theme.fg())
-                };
-                ListItem::new(Span::styled(format!("  #{tag}  "), style))
-            }).collect();
+            let items: Vec<ListItem> = available_tags
+                .iter()
+                .enumerate()
+                .map(|(i, tag)| {
+                    let is_sel = i == *selected;
+                    let style = if is_sel {
+                        Style::default()
+                            .bg(app.theme.red())
+                            .fg(app.theme.bg())
+                            .add_modifier(Modifier::BOLD)
+                    } else {
+                        Style::default().fg(app.theme.fg())
+                    };
+                    ListItem::new(Span::styled(format!("  #{tag}  "), style))
+                })
+                .collect();
 
             frame.render_widget(List::new(items), inner);
         }

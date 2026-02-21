@@ -73,6 +73,25 @@ impl App {
                     self.all_books.clone()
                 }
             }
+            SidebarFilter::Folder(folder_path) => self
+                .all_books
+                .iter()
+                .filter(|b| b.has_file)
+                .filter(|b| {
+                    if let Some(ref _db) = self.db {
+                        if let Ok(card) = omniscope_core::storage::json_cards::load_card_by_id(
+                            &self.cards_dir(),
+                            &b.id,
+                        ) {
+                            if let Some(ref file) = card.file {
+                                return file.path.starts_with(folder_path);
+                            }
+                        }
+                    }
+                    false
+                })
+                .cloned()
+                .collect(),
         };
 
         // Restore cursor: find the same book by ID, else clamp to valid range
@@ -103,10 +122,21 @@ impl App {
                 SidebarItem::Tag { name, .. } => {
                     self.sidebar_filter = SidebarFilter::Tag(name.clone());
                 }
+                SidebarItem::Folder { path } => {
+                    self.sidebar_filter = SidebarFilter::Folder(path.clone());
+                }
                 _ => return,
             }
             self.apply_filter();
             self.active_panel = ActivePanel::BookList;
         }
+    }
+
+    /// Filter books by folder path (for gF command).
+    pub fn filter_by_folder(&mut self, path: &str) {
+        self.sidebar_filter = SidebarFilter::Folder(path.to_string());
+        self.apply_filter();
+        self.active_panel = ActivePanel::BookList;
+        self.status_message = format!("Folder: {}", path);
     }
 }

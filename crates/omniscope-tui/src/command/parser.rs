@@ -1,3 +1,56 @@
+const COMMANDS: &[&str] = &[
+    "q",
+    "quit",
+    "qa",
+    "q!",
+    "w",
+    "write",
+    "wq",
+    "add",
+    "open",
+    "tags",
+    "help",
+    "search",
+    "refresh",
+    "sort title",
+    "sort year",
+    "sort year_asc",
+    "sort rating",
+    "sort frecency",
+    "sort updated",
+    "lib",
+    "library",
+    "tag",
+    "marks",
+    "reg",
+    "registers",
+    "delmarks",
+    "doctor",
+    "macros",
+    "copen",
+    "cclose",
+    "cnext",
+    "cprev",
+    "cn",
+    "cp",
+    "undolist",
+    "earlier",
+    "later",
+];
+
+pub fn get_command_suggestions(prefix: &str) -> Vec<&'static str> {
+    let prefix = prefix.trim();
+    if prefix.is_empty() {
+        return COMMANDS.iter().take(10).copied().collect();
+    }
+    COMMANDS
+        .iter()
+        .filter(|cmd| cmd.starts_with(prefix))
+        .take(10)
+        .copied()
+        .collect()
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CommandAction {
     Quit,
@@ -52,9 +105,7 @@ pub fn parse_command(cmd: &str) -> CommandAction {
         ["open"] => CommandAction::Open,
         ["tags"] => CommandAction::Tags,
         ["help"] => CommandAction::Help,
-        ["search" | "find", rest @ ..] => {
-            CommandAction::Search(rest.join(" "))
-        }
+        ["search" | "find", rest @ ..] => CommandAction::Search(rest.join(" ")),
         ["refresh"] => CommandAction::Refresh,
         ["undolist"] => CommandAction::UndoList,
         ["earlier", time] => CommandAction::Earlier(time.to_string()),
@@ -85,7 +136,7 @@ pub fn parse_command(cmd: &str) -> CommandAction {
         ["bprev" | "bp"] => CommandAction::Unknown("bprev (buffers not implemented)".to_string()),
         _ => {
             let cmd_str = parts.join(" ");
-            
+
             // Check for :g/pattern/command
             if cmd_str.starts_with("g/") || cmd_str.starts_with("v/") {
                 let parts: Vec<&str> = cmd_str.splitn(3, '/').collect();
@@ -95,18 +146,22 @@ pub fn parse_command(cmd: &str) -> CommandAction {
                     return CommandAction::Global { pattern, command };
                 }
             }
-            
+
             // Check for :%s/foo/bar/ or :s/foo/bar/g
             if cmd_str.starts_with("%s/") || cmd_str.starts_with("s/") {
-                 let parts: Vec<&str> = cmd_str.split('/').collect();
-                 if parts.len() >= 3 {
-                     let pattern = parts[1].to_string();
-                     let replacement = parts[2].to_string();
-                     let global = parts.get(3).map_or(false, |&f| f.contains('g'));
-                     return CommandAction::Substitute { pattern, replacement, global };
-                 }
+                let parts: Vec<&str> = cmd_str.split('/').collect();
+                if parts.len() >= 3 {
+                    let pattern = parts[1].to_string();
+                    let replacement = parts[2].to_string();
+                    let global = parts.get(3).map_or(false, |&f| f.contains('g'));
+                    return CommandAction::Substitute {
+                        pattern,
+                        replacement,
+                        global,
+                    };
+                }
             }
-            
+
             CommandAction::Unknown(cmd.to_string())
         }
     }
@@ -128,13 +183,22 @@ mod tests {
 
     #[test]
     fn test_sort_command() {
-        assert_eq!(parse_command("sort title"), CommandAction::Sort("title".to_string()));
-        assert_eq!(parse_command("sort year"), CommandAction::Sort("year".to_string()));
+        assert_eq!(
+            parse_command("sort title"),
+            CommandAction::Sort("title".to_string())
+        );
+        assert_eq!(
+            parse_command("sort year"),
+            CommandAction::Sort("year".to_string())
+        );
     }
 
     #[test]
     fn test_library_command() {
-        assert_eq!(parse_command("lib fiction"), CommandAction::Library("fiction".to_string()));
+        assert_eq!(
+            parse_command("lib fiction"),
+            CommandAction::Library("fiction".to_string())
+        );
     }
 
     #[test]
@@ -142,7 +206,10 @@ mod tests {
         assert_eq!(parse_command("marks"), CommandAction::Marks);
         assert_eq!(parse_command("reg"), CommandAction::Registers(None));
         assert_eq!(parse_command("reg a"), CommandAction::Registers(Some('a')));
-        assert_eq!(parse_command("delmarks abc"), CommandAction::DeleteMarks("abc".to_string()));
+        assert_eq!(
+            parse_command("delmarks abc"),
+            CommandAction::DeleteMarks("abc".to_string())
+        );
     }
 
     #[test]
@@ -159,14 +226,21 @@ mod tests {
     fn test_global_command() {
         assert_eq!(
             parse_command("g/rust/d"),
-            CommandAction::Global { pattern: "rust".to_string(), command: "d".to_string() }
+            CommandAction::Global {
+                pattern: "rust".to_string(),
+                command: "d".to_string()
+            }
         );
     }
 
     #[test]
     fn test_substitute() {
         match parse_command("s/foo/bar/g") {
-            CommandAction::Substitute { pattern, replacement, global } => {
+            CommandAction::Substitute {
+                pattern,
+                replacement,
+                global,
+            } => {
                 assert_eq!(pattern, "foo");
                 assert_eq!(replacement, "bar");
                 assert!(global);

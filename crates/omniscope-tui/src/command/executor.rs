@@ -1,5 +1,5 @@
-use crate::app::App;
 use super::{parse_command, CommandAction};
+use crate::app::App;
 
 pub fn execute_command(app: &mut App, cmd: &str) {
     match parse_command(cmd) {
@@ -33,67 +33,90 @@ pub fn execute_command(app: &mut App, cmd: &str) {
             if let Ok(re) = regex::Regex::new(&pattern) {
                 let mut matched_indices = Vec::new();
                 for (i, book) in app.books.iter().enumerate() {
-                     let search_text = format!("{} {} {}", book.title, book.authors.join(" "), book.tags.join(" "));
-                     if re.is_match(&search_text) {
-                          matched_indices.push(i);
-                     }
+                    let search_text = format!(
+                        "{} {} {}",
+                        book.title,
+                        book.authors.join(" "),
+                        book.tags.join(" ")
+                    );
+                    if re.is_match(&search_text) {
+                        matched_indices.push(i);
+                    }
                 }
-                
+
                 if matched_indices.is_empty() {
-                     app.status_message = format!("No matches for pattern: {pattern}");
+                    app.status_message = format!("No matches for pattern: {pattern}");
                 } else {
-                     if command == "d" {
-                          app.delete_indices(&matched_indices);
-                          app.status_message = format!("Global delete executed on {} items", matched_indices.len());
-                     } else if command.starts_with("tag ") {
-                          let tag = command.trim_start_matches("tag ").trim();
-                          let mut cards = Vec::new();
-                          let cards_dir = app.config.cards_dir();
-                          for &idx in &matched_indices {
-                               if let Some(view) = app.books.get(idx) {
-                                    if let Ok(mut card) = omniscope_core::storage::json_cards::load_card_by_id(&cards_dir, &view.id) {
-                                         if !card.organization.tags.contains(&tag.to_string()) {
-                                             card.organization.tags.push(tag.to_string());
-                                         }
-                                         cards.push(card);
+                    if command == "d" {
+                        app.delete_indices(&matched_indices);
+                        app.status_message =
+                            format!("Global delete executed on {} items", matched_indices.len());
+                    } else if command.starts_with("tag ") {
+                        let tag = command.trim_start_matches("tag ").trim();
+                        let mut cards = Vec::new();
+                        let cards_dir = app.cards_dir();
+                        for &idx in &matched_indices {
+                            if let Some(view) = app.books.get(idx) {
+                                if let Ok(mut card) =
+                                    omniscope_core::storage::json_cards::load_card_by_id(
+                                        &cards_dir, &view.id,
+                                    )
+                                {
+                                    if !card.organization.tags.contains(&tag.to_string()) {
+                                        card.organization.tags.push(tag.to_string());
                                     }
-                               }
-                          }
-                          
-                          if !cards.is_empty() {
-                               app.push_undo(
-                                   format!("Global tag '{tag}' applied to {} items", cards.len()),
-                                   omniscope_core::undo::UndoAction::UpsertCards(cards.clone())
-                               );
-                               for card in &cards {
-                                    let _ = omniscope_core::storage::json_cards::save_card(&cards_dir, card);
-                                    if let Some(ref db) = app.db {
-                                         let _ = db.upsert_book(card);
-                                    }
-                               }
-                               app.refresh_books();
-                          }
-                          app.status_message = format!("Global tag applied to {} items", cards.len());
-                     } else {
-                          app.status_message = format!("Global command not supported: {command}");
-                     }
+                                    cards.push(card);
+                                }
+                            }
+                        }
+
+                        if !cards.is_empty() {
+                            app.push_undo(
+                                format!("Global tag '{tag}' applied to {} items", cards.len()),
+                                omniscope_core::undo::UndoAction::UpsertCards(cards.clone()),
+                            );
+                            for card in &cards {
+                                let _ = omniscope_core::storage::json_cards::save_card(
+                                    &cards_dir, card,
+                                );
+                                if let Some(ref db) = app.db {
+                                    let _ = db.upsert_book(card);
+                                }
+                            }
+                            app.refresh_books();
+                        }
+                        app.status_message = format!("Global tag applied to {} items", cards.len());
+                    } else {
+                        app.status_message = format!("Global command not supported: {command}");
+                    }
                 }
             } else {
-                 app.status_message = format!("Invalid regex pattern: {pattern}");
+                app.status_message = format!("Invalid regex pattern: {pattern}");
             }
         }
-        CommandAction::Substitute { pattern, replacement, global } => {
-             app.status_message = format!("Substitute `{pattern}` -> `{replacement}` (global: {global}) not yet fully implemented");
+        CommandAction::Substitute {
+            pattern,
+            replacement,
+            global,
+        } => {
+            app.status_message = format!("Substitute `{pattern}` -> `{replacement}` (global: {global}) not yet fully implemented");
         }
         CommandAction::UndoList => {
-            app.status_message = format!("Undo history: {} items, Redo: {} items", app.undo_stack.len(), app.redo_stack.len());
+            app.status_message = format!(
+                "Undo history: {} items, Redo: {} items",
+                app.undo_stack.len(),
+                app.redo_stack.len()
+            );
         }
         CommandAction::QuickfixOpen => {
             if app.quickfix_list.is_empty() {
                 app.status_message = "Quickfix list is empty.".to_string();
             } else {
                 app.quickfix_show = true;
-                app.status_message = format!("Opened quickfix list with {} items", app.quickfix_list.len());
+                app.status_message = format!(
+                    "Opened quickfix list with {} items",
+                    app.quickfix_list.len()
+                );
             }
         }
         CommandAction::QuickfixClose => {
@@ -101,7 +124,8 @@ pub fn execute_command(app: &mut App, cmd: &str) {
         }
         CommandAction::QuickfixNext => {
             if !app.quickfix_list.is_empty() {
-                app.quickfix_selected = (app.quickfix_selected + 1).min(app.quickfix_list.len() - 1);
+                app.quickfix_selected =
+                    (app.quickfix_selected + 1).min(app.quickfix_list.len() - 1);
             }
         }
         CommandAction::QuickfixPrev => {
@@ -114,7 +138,10 @@ pub fn execute_command(app: &mut App, cmd: &str) {
                 app.status_message = "Quickfix list is empty.".to_string();
                 return;
             }
-            app.status_message = format!("Executing `{command}` on {} items (WIP)", app.quickfix_list.len());
+            app.status_message = format!(
+                "Executing `{command}` on {} items (WIP)",
+                app.quickfix_list.len()
+            );
         }
         CommandAction::Earlier(time_str) => {
             let duration = parse_duration(&time_str);
@@ -161,7 +188,9 @@ pub fn execute_command(app: &mut App, cmd: &str) {
             app.status_message = format!("Tag filter: {tag}");
         }
         CommandAction::Marks => {
-            let marks_display: Vec<String> = app.marks.iter()
+            let marks_display: Vec<String> = app
+                .marks
+                .iter()
                 .map(|(&k, &v)| format!("'{k} -> {}", v + 1))
                 .collect();
             if marks_display.is_empty() {
@@ -175,7 +204,9 @@ pub fn execute_command(app: &mut App, cmd: &str) {
                 if let Some(register) = app.registers.get(&r) {
                     let desc = match &register.content {
                         crate::app::RegisterContent::Card(c) => c.metadata.title.clone(),
-                        crate::app::RegisterContent::MultipleCards(cards) => format!("{} cards", cards.len()),
+                        crate::app::RegisterContent::MultipleCards(cards) => {
+                            format!("{} cards", cards.len())
+                        }
                         crate::app::RegisterContent::Text(t) => t.clone(),
                         crate::app::RegisterContent::Path(p) => p.clone(),
                     };
@@ -184,9 +215,7 @@ pub fn execute_command(app: &mut App, cmd: &str) {
                     app.status_message = format!("Register \"{r} is empty");
                 }
             } else {
-                let regs: Vec<String> = app.registers.keys()
-                    .map(|k| format!("\"{k}"))
-                    .collect();
+                let regs: Vec<String> = app.registers.keys().map(|k| format!("\"{k}")).collect();
                 if regs.is_empty() {
                     app.status_message = "No registers".to_string();
                 } else {
@@ -205,7 +234,8 @@ pub fn execute_command(app: &mut App, cmd: &str) {
             if list.is_empty() {
                 app.status_message = "No macros recorded".to_string();
             } else {
-                let desc: Vec<String> = list.iter()
+                let desc: Vec<String> = list
+                    .iter()
                     .map(|(reg, len)| format!("@{reg} ({len} keys)"))
                     .collect();
                 app.status_message = format!("Macros: {}", desc.join(" | "));
@@ -231,13 +261,13 @@ pub fn execute_command(app: &mut App, cmd: &str) {
 fn parse_duration(s: &str) -> chrono::Duration {
     let s = s.trim();
     if s.ends_with('m') {
-        let mins: i64 = s[..s.len()-1].parse().unwrap_or(0);
+        let mins: i64 = s[..s.len() - 1].parse().unwrap_or(0);
         chrono::Duration::minutes(mins)
     } else if s.ends_with('h') {
-        let hours: i64 = s[..s.len()-1].parse().unwrap_or(0);
+        let hours: i64 = s[..s.len() - 1].parse().unwrap_or(0);
         chrono::Duration::hours(hours)
     } else if s.ends_with('s') {
-        let secs: i64 = s[..s.len()-1].parse().unwrap_or(0);
+        let secs: i64 = s[..s.len() - 1].parse().unwrap_or(0);
         chrono::Duration::seconds(secs)
     } else {
         chrono::Duration::zero()

@@ -10,11 +10,26 @@ pub fn get_hints(app: &App) -> Vec<KeyHint> {
     // 1. If in Register selection mode
     if app.pending_register_select {
         return vec![
-            KeyHint { key: "0-9", desc: "numbered" },
-            KeyHint { key: "a-z", desc: "named" },
-            KeyHint { key: "+",   desc: "sys clipboard" },
-            KeyHint { key: "*",   desc: "sys selection" },
-            KeyHint { key: "_",   desc: "black hole" },
+            KeyHint {
+                key: "0-9",
+                desc: "numbered",
+            },
+            KeyHint {
+                key: "a-z",
+                desc: "named",
+            },
+            KeyHint {
+                key: "+",
+                desc: "sys clipboard",
+            },
+            KeyHint {
+                key: "*",
+                desc: "sys selection",
+            },
+            KeyHint {
+                key: "_",
+                desc: "black hole",
+            },
         ];
     }
 
@@ -22,7 +37,10 @@ pub fn get_hints(app: &App) -> Vec<KeyHint> {
     if app.macro_recorder.is_recording() {
         if let Some(_reg) = app.macro_recorder.recording_register {
             return vec![
-                KeyHint { key: "q", desc: &"stop recording" },
+                KeyHint {
+                    key: "q",
+                    desc: &"stop recording",
+                },
                 KeyHint { key: "", desc: &"" }, // placeholder
             ];
             // Note: We return a simple hint. The status bar shows @reg recording.
@@ -32,31 +50,97 @@ pub fn get_hints(app: &App) -> Vec<KeyHint> {
     // 3. If an operator is pending (e.g. after 'd', 'y')
     if let Some(op) = app.pending_operator {
         let mut hints = motion_hints();
-        
+
         // Context-specific additions for operators
         if op == Operator::Change {
-            hints.insert(0, KeyHint { key: "a", desc: "author" });
-            hints.insert(1, KeyHint { key: "t", desc: "tags" });
-            hints.insert(2, KeyHint { key: "r", desc: "rating" });
-            hints.insert(3, KeyHint { key: "s", desc: "status" });
-            hints.insert(4, KeyHint { key: "y", desc: "year" });
-            hints.insert(5, KeyHint { key: "n", desc: "notes" });
+            hints.insert(
+                0,
+                KeyHint {
+                    key: "a",
+                    desc: "author",
+                },
+            );
+            hints.insert(
+                1,
+                KeyHint {
+                    key: "t",
+                    desc: "tags",
+                },
+            );
+            hints.insert(
+                2,
+                KeyHint {
+                    key: "r",
+                    desc: "rating",
+                },
+            );
+            hints.insert(
+                3,
+                KeyHint {
+                    key: "s",
+                    desc: "status",
+                },
+            );
+            hints.insert(
+                4,
+                KeyHint {
+                    key: "y",
+                    desc: "year",
+                },
+            );
+            hints.insert(
+                5,
+                KeyHint {
+                    key: "n",
+                    desc: "notes",
+                },
+            );
         }
-        
+
         // Add text objects
         hints.extend(vec![
-            KeyHint { key: "ib", desc: "inner book" },
-            KeyHint { key: "ab", desc: "a book" },
-            KeyHint { key: "il", desc: "inner library" },
-            KeyHint { key: "al", desc: "a library" },
-            KeyHint { key: "it", desc: "inner tag" },
-            KeyHint { key: "at", desc: "a tag" },
-            KeyHint { key: "ia", desc: "inner author" },
-            KeyHint { key: "aa", desc: "a author" },
-            KeyHint { key: "iy", desc: "inner year" },
-            KeyHint { key: "if", desc: "inner folder" },
+            KeyHint {
+                key: "ib",
+                desc: "inner book",
+            },
+            KeyHint {
+                key: "ab",
+                desc: "a book",
+            },
+            KeyHint {
+                key: "il",
+                desc: "inner library",
+            },
+            KeyHint {
+                key: "al",
+                desc: "a library",
+            },
+            KeyHint {
+                key: "it",
+                desc: "inner tag",
+            },
+            KeyHint {
+                key: "at",
+                desc: "a tag",
+            },
+            KeyHint {
+                key: "ia",
+                desc: "inner author",
+            },
+            KeyHint {
+                key: "aa",
+                desc: "a author",
+            },
+            KeyHint {
+                key: "iy",
+                desc: "inner year",
+            },
+            KeyHint {
+                key: "if",
+                desc: "inner folder",
+            },
         ]);
-        
+
         return hints;
     }
 
@@ -64,14 +148,38 @@ pub fn get_hints(app: &App) -> Vec<KeyHint> {
     match app.mode {
         Mode::Visual | Mode::VisualLine | Mode::VisualBlock => {
             return vec![
-                KeyHint { key: "y", desc: "yank" },
-                KeyHint { key: "d", desc: "delete" },
-                KeyHint { key: "x", desc: "delete" },
-                KeyHint { key: "c", desc: "change" },
-                KeyHint { key: "o", desc: "swap anchor" },
-                KeyHint { key: "Space", desc: "toggle" },
-                KeyHint { key: "C-a", desc: "select all" },
-                KeyHint { key: "C-q", desc: "quickfix" },
+                KeyHint {
+                    key: "y",
+                    desc: "yank",
+                },
+                KeyHint {
+                    key: "d",
+                    desc: "delete",
+                },
+                KeyHint {
+                    key: "x",
+                    desc: "delete",
+                },
+                KeyHint {
+                    key: "c",
+                    desc: "change",
+                },
+                KeyHint {
+                    key: "o",
+                    desc: "swap anchor",
+                },
+                KeyHint {
+                    key: "Space",
+                    desc: "toggle",
+                },
+                KeyHint {
+                    key: "C-a",
+                    desc: "select all",
+                },
+                KeyHint {
+                    key: "C-q",
+                    desc: "quickfix",
+                },
             ];
         }
         _ => {}
@@ -80,106 +188,325 @@ pub fn get_hints(app: &App) -> Vec<KeyHint> {
     // 5. Pending key prefixes (g, z, S, etc.)
     if let Some(pending) = app.pending_key {
         match pending {
-            'S' => return vec![
-                KeyHint { key: "y", desc: "year desc" },
-                KeyHint { key: "Y", desc: "year asc" },
-                KeyHint { key: "t", desc: "title asc" },
-                KeyHint { key: "r", desc: "rating desc" },
-                KeyHint { key: "f", desc: "frecency" },
-                KeyHint { key: "u", desc: "updated (default)" },
-            ],
-            'g' => return vec![
-                KeyHint { key: "g", desc: "top" },
-                KeyHint { key: "h", desc: "home (all)" },
-                KeyHint { key: "l", desc: "last jump" },
-                KeyHint { key: "p", desc: "parent" },
-                KeyHint { key: "r", desc: "root" },
-                KeyHint { key: "s", desc: "cycle status" },
-                KeyHint { key: "t", desc: "edit title" },
-                KeyHint { key: "f", desc: "open file" },
-                KeyHint { key: "I", desc: "open in $EDITOR" },
-                KeyHint { key: "v", desc: "reselect visual" },
-                KeyHint { key: "z", desc: "center view" },
-                KeyHint { key: "*", desc: "search author" },
-                KeyHint { key: "b", desc: "buffers" },
-                KeyHint { key: "B", desc: "prev buffer" },
-            ],
-            'z' => return vec![
-                KeyHint { key: "z", desc: "center" },
-                KeyHint { key: "t", desc: "top" },
-                KeyHint { key: "b", desc: "bottom" },
-                KeyHint { key: "a", desc: "toggle fold" },
-                KeyHint { key: "o", desc: "open fold" },
-                KeyHint { key: "c", desc: "close fold" },
-                KeyHint { key: "R", desc: "open all" },
-                KeyHint { key: "M", desc: "close all" },
-            ],
-            'm' => return vec![
-                KeyHint { key: "a-z", desc: "set local mark" },
-                KeyHint { key: "A-Z", desc: "set global mark" },
-            ],
-            '\'' => return vec![
-                KeyHint { key: "a-z", desc: "jump to mark" },
-                KeyHint { key: "'", desc: "last position" },
-                KeyHint { key: "<", desc: "visual start" },
-                KeyHint { key: ">", desc: "visual end" },
-            ],
-            '[' => return vec![
-                KeyHint { key: "[", desc: "prev group" },
-            ],
-            ']' => return vec![
-                KeyHint { key: "]", desc: "next group" },
-            ],
-            ' ' => return vec![
-                KeyHint { key: "Space", desc: "all labels" },
-                KeyHint { key: "j", desc: "labels below" },
-                KeyHint { key: "k", desc: "labels above" },
-                KeyHint { key: "/", desc: "by first letter" },
-            ],
-            'f' | 'F' | 't' | 'T' => return vec![
-                KeyHint { key: "<char>", desc: "jump to char" },
-            ],
-            'Q' => return vec![
-                KeyHint { key: "a-z", desc: "register to record" },
-            ],
-            '@' => return vec![
-                KeyHint { key: "a-z", desc: "play macro" },
-                KeyHint { key: "@", desc: "replay last" },
-            ],
+            'S' => {
+                return vec![
+                    KeyHint {
+                        key: "y",
+                        desc: "year desc",
+                    },
+                    KeyHint {
+                        key: "Y",
+                        desc: "year asc",
+                    },
+                    KeyHint {
+                        key: "t",
+                        desc: "title asc",
+                    },
+                    KeyHint {
+                        key: "r",
+                        desc: "rating desc",
+                    },
+                    KeyHint {
+                        key: "f",
+                        desc: "frecency",
+                    },
+                    KeyHint {
+                        key: "u",
+                        desc: "updated (default)",
+                    },
+                ]
+            }
+            'g' => {
+                return vec![
+                    KeyHint {
+                        key: "g",
+                        desc: "top",
+                    },
+                    KeyHint {
+                        key: "h",
+                        desc: "home (all)",
+                    },
+                    KeyHint {
+                        key: "l",
+                        desc: "last jump",
+                    },
+                    KeyHint {
+                        key: "p",
+                        desc: "parent",
+                    },
+                    KeyHint {
+                        key: "r",
+                        desc: "root",
+                    },
+                    KeyHint {
+                        key: "s",
+                        desc: "cycle status",
+                    },
+                    KeyHint {
+                        key: "t",
+                        desc: "edit title",
+                    },
+                    KeyHint {
+                        key: "f",
+                        desc: "open file",
+                    },
+                    KeyHint {
+                        key: "F",
+                        desc: "goto folder",
+                    },
+                    KeyHint {
+                        key: "I",
+                        desc: "open in $EDITOR",
+                    },
+                    KeyHint {
+                        key: "v",
+                        desc: "reselect visual",
+                    },
+                    KeyHint {
+                        key: "z",
+                        desc: "center view",
+                    },
+                    KeyHint {
+                        key: "*",
+                        desc: "search author",
+                    },
+                    KeyHint {
+                        key: "b",
+                        desc: "buffers",
+                    },
+                    KeyHint {
+                        key: "B",
+                        desc: "prev buffer",
+                    },
+                ]
+            }
+            'z' => {
+                return vec![
+                    KeyHint {
+                        key: "z",
+                        desc: "center",
+                    },
+                    KeyHint {
+                        key: "t",
+                        desc: "top",
+                    },
+                    KeyHint {
+                        key: "b",
+                        desc: "bottom",
+                    },
+                    KeyHint {
+                        key: "a",
+                        desc: "toggle fold",
+                    },
+                    KeyHint {
+                        key: "o",
+                        desc: "open fold",
+                    },
+                    KeyHint {
+                        key: "c",
+                        desc: "close fold",
+                    },
+                    KeyHint {
+                        key: "R",
+                        desc: "open all",
+                    },
+                    KeyHint {
+                        key: "M",
+                        desc: "close all",
+                    },
+                ]
+            }
+            'm' => {
+                return vec![
+                    KeyHint {
+                        key: "a-z",
+                        desc: "set local mark",
+                    },
+                    KeyHint {
+                        key: "A-Z",
+                        desc: "set global mark",
+                    },
+                ]
+            }
+            '\'' => {
+                return vec![
+                    KeyHint {
+                        key: "a-z",
+                        desc: "jump to mark",
+                    },
+                    KeyHint {
+                        key: "'",
+                        desc: "last position",
+                    },
+                    KeyHint {
+                        key: "<",
+                        desc: "visual start",
+                    },
+                    KeyHint {
+                        key: ">",
+                        desc: "visual end",
+                    },
+                ]
+            }
+            '[' => {
+                return vec![KeyHint {
+                    key: "[",
+                    desc: "prev group",
+                }]
+            }
+            ']' => {
+                return vec![KeyHint {
+                    key: "]",
+                    desc: "next group",
+                }]
+            }
+            ' ' => {
+                return vec![
+                    KeyHint {
+                        key: "Space",
+                        desc: "all labels",
+                    },
+                    KeyHint {
+                        key: "j",
+                        desc: "labels below",
+                    },
+                    KeyHint {
+                        key: "k",
+                        desc: "labels above",
+                    },
+                    KeyHint {
+                        key: "/",
+                        desc: "by first letter",
+                    },
+                ]
+            }
+            'f' | 'F' | 't' | 'T' => {
+                return vec![KeyHint {
+                    key: "<char>",
+                    desc: "jump to char",
+                }]
+            }
+            'Q' => {
+                return vec![KeyHint {
+                    key: "a-z",
+                    desc: "register to record",
+                }]
+            }
+            '@' => {
+                return vec![
+                    KeyHint {
+                        key: "a-z",
+                        desc: "play macro",
+                    },
+                    KeyHint {
+                        key: "@",
+                        desc: "replay last",
+                    },
+                ]
+            }
             _ => {}
         }
     }
 
     // 6. Normal mode — show basic hints
     vec![
-        KeyHint { key: "j/k", desc: "up/down" },
-        KeyHint { key: "h/l", desc: "focus panel" },
-        KeyHint { key: "gg/G", desc: "top/bottom" },
-        KeyHint { key: "d", desc: "delete" },
-        KeyHint { key: "y", desc: "yank" },
-        KeyHint { key: "c", desc: "change" },
-        KeyHint { key: "v/V", desc: "visual" },
-        KeyHint { key: "o/Enter", desc: "open" },
-        KeyHint { key: "/", desc: "search" },
-        KeyHint { key: "Z", desc: "telescope" },
-        KeyHint { key: ":", desc: "command" },
-        KeyHint { key: "u", desc: "undo" },
-        KeyHint { key: "S", desc: "sort" },
-        KeyHint { key: "Space", desc: "easymotion" },
-        KeyHint { key: "g", desc: "g-commands" },
-        KeyHint { key: "z", desc: "viewport" },
+        KeyHint {
+            key: "j/k",
+            desc: "up/down",
+        },
+        KeyHint {
+            key: "h/l",
+            desc: "focus panel",
+        },
+        KeyHint {
+            key: "gg/G",
+            desc: "top/bottom",
+        },
+        KeyHint {
+            key: "d",
+            desc: "delete",
+        },
+        KeyHint {
+            key: "y",
+            desc: "yank",
+        },
+        KeyHint {
+            key: "c",
+            desc: "change",
+        },
+        KeyHint {
+            key: "v/V",
+            desc: "visual",
+        },
+        KeyHint {
+            key: "o/Enter",
+            desc: "open",
+        },
+        KeyHint {
+            key: "/",
+            desc: "search",
+        },
+        KeyHint {
+            key: "Z",
+            desc: "telescope",
+        },
+        KeyHint {
+            key: ":",
+            desc: "command",
+        },
+        KeyHint {
+            key: "u",
+            desc: "undo",
+        },
+        KeyHint {
+            key: "S",
+            desc: "sort",
+        },
+        KeyHint {
+            key: "Space",
+            desc: "easymotion",
+        },
+        KeyHint {
+            key: "g",
+            desc: "g-commands",
+        },
+        KeyHint {
+            key: "z",
+            desc: "viewport",
+        },
     ]
 }
 
 fn motion_hints() -> Vec<KeyHint> {
     vec![
-        KeyHint { key: "j", desc: "down" },
-        KeyHint { key: "k", desc: "up" },
-        KeyHint { key: "G", desc: "bottom" },
-        KeyHint { key: "gg", desc: "top" },
-        KeyHint { key: "0", desc: "first" },
-        KeyHint { key: "$", desc: "last" },
-        KeyHint { key: "f<c>", desc: "find char" },
+        KeyHint {
+            key: "j",
+            desc: "down",
+        },
+        KeyHint {
+            key: "k",
+            desc: "up",
+        },
+        KeyHint {
+            key: "G",
+            desc: "bottom",
+        },
+        KeyHint {
+            key: "gg",
+            desc: "top",
+        },
+        KeyHint {
+            key: "0",
+            desc: "first",
+        },
+        KeyHint {
+            key: "$",
+            desc: "last",
+        },
+        KeyHint {
+            key: "f<c>",
+            desc: "find char",
+        },
     ]
 }
 
@@ -187,7 +514,7 @@ fn motion_hints() -> Vec<KeyHint> {
 mod tests {
     use super::*;
     use omniscope_core::AppConfig;
-    
+
     fn mock_app() -> App {
         App::new(AppConfig::default(), None)
     }

@@ -1,13 +1,13 @@
-use crossterm::event::{KeyCode, KeyModifiers};
 use crate::app::App;
 use crate::popup::{Popup, TelescopeMode};
+use crossterm::event::{KeyCode, KeyModifiers};
 
 pub(crate) fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
     match &mut app.popup {
         Some(Popup::AddBook(form)) => {
             // Check if we are editing the "File path" field (index 5)
             let is_path_field = form.active_field == 5;
-            
+
             match code {
                 KeyCode::Esc => {
                     if form.autocomplete.active {
@@ -18,11 +18,12 @@ pub(crate) fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModif
                 }
                 KeyCode::Enter => {
                     if form.autocomplete.active {
-                        if let Some(selection) = form.autocomplete.current().map(|s| s.to_string()) {
+                        if let Some(selection) = form.autocomplete.current().map(|s| s.to_string())
+                        {
                             // Apply selection
                             let field = &mut form.fields[5];
                             let current = &field.value;
-                            
+
                             // Simple logic: expand ~ if needed, resolve parent dir
                             let expanded = if current.starts_with("~/") {
                                 if let Some(home) = dirs::home_dir() {
@@ -33,16 +34,18 @@ pub(crate) fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModif
                             } else {
                                 current.clone()
                             };
-                            
+
                             let path = std::path::Path::new(&expanded);
                             let dir = if expanded.ends_with('/') {
                                 path.to_path_buf()
                             } else {
-                                path.parent().unwrap_or(std::path::Path::new(".")).to_path_buf()
+                                path.parent()
+                                    .unwrap_or(std::path::Path::new("."))
+                                    .to_path_buf()
                             };
-                            
+
                             let new_full_path = dir.join(&selection).to_string_lossy().to_string();
-                            
+
                             // Restore ~ prefix if it was there
                             let final_val = if current.starts_with("~/") {
                                 if let Some(home) = dirs::home_dir() {
@@ -58,28 +61,28 @@ pub(crate) fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModif
                             } else {
                                 new_full_path
                             };
-                            
+
                             field.value = final_val;
-                            
+
                             // If resulting path is a directory, append /
                             let check_path = if field.value.starts_with("~/") {
-                                 if let Some(home) = dirs::home_dir() {
-                                     field.value.replacen("~", &home.to_string_lossy(), 1)
-                                 } else {
-                                     field.value.clone()
-                                 }
+                                if let Some(home) = dirs::home_dir() {
+                                    field.value.replacen("~", &home.to_string_lossy(), 1)
+                                } else {
+                                    field.value.clone()
+                                }
                             } else {
                                 field.value.clone()
                             };
-                            
+
                             if let Ok(m) = std::fs::metadata(&check_path) {
                                 if m.is_dir() && !field.value.ends_with('/') {
                                     field.value.push('/');
                                 }
                             }
-                            
+
                             field.cursor = field.value.len();
-                            
+
                             // If directory, keep completing inside it
                             if field.value.ends_with('/') {
                                 update_filepath_suggestions(form);
@@ -87,7 +90,7 @@ pub(crate) fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModif
                                 form.autocomplete.clear();
                             }
                         } else {
-                             form.autocomplete.clear();
+                            form.autocomplete.clear();
                         }
                     } else {
                         app.submit_add_book();
@@ -97,10 +100,10 @@ pub(crate) fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModif
                     if form.autocomplete.active {
                         form.autocomplete.tab_next();
                     } else if is_path_field {
-                         update_filepath_suggestions(form);
-                         if !form.autocomplete.active {
-                             form.next_field();
-                         }
+                        update_filepath_suggestions(form);
+                        if !form.autocomplete.active {
+                            form.next_field();
+                        }
                     } else {
                         form.next_field();
                     }
@@ -160,10 +163,12 @@ pub(crate) fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModif
                 // Clear rating
                 if let Some(book) = app.selected_book() {
                     let id = book.id;
-                    let cards_dir = app.config.cards_dir();
-                    // Load and modify card directly — logic could be moved to app struct method 
+                    let cards_dir = app.cards_dir();
+                    // Load and modify card directly — logic could be moved to app struct method
                     // but keeping it here as in original code for now
-                    if let Ok(mut card) = omniscope_core::storage::json_cards::load_card_by_id(&cards_dir, &id) {
+                    if let Ok(mut card) =
+                        omniscope_core::storage::json_cards::load_card_by_id(&cards_dir, &id)
+                    {
                         card.organization.rating = None;
                         card.updated_at = chrono::Utc::now();
                         let _ = omniscope_core::storage::json_cards::save_card(&cards_dir, &card);
@@ -183,7 +188,9 @@ pub(crate) fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModif
         },
 
         Some(Popup::SetStatus { .. }) => match code {
-            KeyCode::Esc => { app.popup = None; }
+            KeyCode::Esc => {
+                app.popup = None;
+            }
             KeyCode::Char(' ') => {
                 // Cycle through statuses
                 app.popup = None;
@@ -272,7 +279,9 @@ pub(crate) fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModif
                     }
                     KeyCode::Enter => {
                         if state.autocomplete.active {
-                            if let Some(candidate) = state.autocomplete.current().map(|s| s.to_string()) {
+                            if let Some(candidate) =
+                                state.autocomplete.current().map(|s| s.to_string())
+                            {
                                 state.accept_autocomplete(&candidate);
                                 let q = state.query.clone();
                                 app.telescope_search(&q);
@@ -293,7 +302,8 @@ pub(crate) fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModif
                         app.quickfix_show = true;
                         app.popup = None; // close telescope
                         app.quickfix_selected = 0;
-                        app.status_message = format!("Sent {} items to quickfix", app.quickfix_list.len());
+                        app.status_message =
+                            format!("Sent {} items to quickfix", app.quickfix_list.len());
                     }
                     KeyCode::Backspace => {
                         state.delete_back();
@@ -358,9 +368,15 @@ pub(crate) fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModif
                     KeyCode::Enter => {
                         app.telescope_open_selected();
                     }
-                    KeyCode::Char('j') | KeyCode::Down => { state.result_down(20); }
-                    KeyCode::Char('k') | KeyCode::Up => { state.result_up(); }
-                    KeyCode::Char('G') => { state.result_bottom(); }
+                    KeyCode::Char('j') | KeyCode::Down => {
+                        state.result_down(20);
+                    }
+                    KeyCode::Char('k') | KeyCode::Up => {
+                        state.result_up();
+                    }
+                    KeyCode::Char('G') => {
+                        state.result_bottom();
+                    }
                     KeyCode::Char('g') => {
                         if state.pending_g {
                             state.result_top();
@@ -370,19 +386,24 @@ pub(crate) fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModif
                         }
                     }
                     KeyCode::Char('d') if modifiers.contains(KeyModifiers::CONTROL) => {
-                        state.result_down(20); state.half_page_down(20);
+                        state.result_down(20);
+                        state.half_page_down(20);
                     }
                     KeyCode::Char('u') if modifiers.contains(KeyModifiers::CONTROL) => {
-                        state.result_up(); state.half_page_up(20);
+                        state.result_up();
+                        state.half_page_up(20);
                     }
                     KeyCode::Char('q') if modifiers.contains(KeyModifiers::CONTROL) => {
                         app.quickfix_list = state.results.clone();
                         app.quickfix_show = true;
                         app.popup = None;
                         app.quickfix_selected = 0;
-                        app.status_message = format!("Sent {} items to quickfix", app.quickfix_list.len());
+                        app.status_message =
+                            format!("Sent {} items to quickfix", app.quickfix_list.len());
                     }
-                    _ => { state.pending_g = false; }
+                    _ => {
+                        state.pending_g = false;
+                    }
                 },
             }
         }
@@ -402,7 +423,10 @@ pub(crate) fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModif
                 KeyCode::Char(c) => {
                     if is_pending {
                         // Space / <char> — filter by first letter, build targets
-                        let targets = crate::keys::ext::easy_motion::build_easy_motion_targets_by_char(app, c);
+                        let targets =
+                            crate::keys::ext::easy_motion::build_easy_motion_targets_by_char(
+                                app, c,
+                            );
                         if targets.is_empty() {
                             app.popup = None;
                             app.status_message = format!("No books starting with '{c}'");
@@ -413,7 +437,9 @@ pub(crate) fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModif
                             }));
                             app.status_message = format!("EasyMotion ('{c}'): type target label");
                         }
-                    } else if let Some(&(_, idx)) = state_clone.targets.iter().find(|&&(tc, _)| tc == c) {
+                    } else if let Some(&(_, idx)) =
+                        state_clone.targets.iter().find(|&&(tc, _)| tc == c)
+                    {
                         app.selected_index = idx;
                         app.popup = None;
                         app.status_message = "EasyMotion jump success".to_string();
@@ -433,135 +459,200 @@ pub(crate) fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModif
             _ => {}
         },
 
-        Some(Popup::EditYear { .. }) => {
-            match code {
-                KeyCode::Esc => { app.popup = None; }
-                KeyCode::Enter => {
-                    if let Some(Popup::EditYear { book_id, input, .. }) = app.popup.take() {
-                        app.submit_edit_year(&book_id, &input);
-                    }
-                }
-                KeyCode::Backspace => {
-                    if let Some(Popup::EditYear { ref mut input, ref mut cursor, .. }) = app.popup {
-                        if *cursor > 0 {
-                            input.remove(*cursor - 1);
-                            *cursor -= 1;
-                        }
-                    }
-                }
-                KeyCode::Char(c) if c.is_ascii_digit() || c == '-' => {
-                    if let Some(Popup::EditYear { ref mut input, ref mut cursor, .. }) = app.popup {
-                        input.insert(*cursor, c);
-                        *cursor += 1;
-                    }
-                }
-                _ => {}
+        Some(Popup::EditYear { .. }) => match code {
+            KeyCode::Esc => {
+                app.popup = None;
             }
-        }
+            KeyCode::Enter => {
+                if let Some(Popup::EditYear { book_id, input, .. }) = app.popup.take() {
+                    app.submit_edit_year(&book_id, &input);
+                }
+            }
+            KeyCode::Backspace => {
+                if let Some(Popup::EditYear {
+                    ref mut input,
+                    ref mut cursor,
+                    ..
+                }) = app.popup
+                {
+                    if *cursor > 0 {
+                        input.remove(*cursor - 1);
+                        *cursor -= 1;
+                    }
+                }
+            }
+            KeyCode::Char(c) if c.is_ascii_digit() || c == '-' => {
+                if let Some(Popup::EditYear {
+                    ref mut input,
+                    ref mut cursor,
+                    ..
+                }) = app.popup
+                {
+                    input.insert(*cursor, c);
+                    *cursor += 1;
+                }
+            }
+            _ => {}
+        },
 
-        Some(Popup::EditAuthors { .. }) => {
-            match code {
-                KeyCode::Esc => { app.popup = None; }
-                KeyCode::Enter => {
-                    if let Some(Popup::EditAuthors { book_id, input, .. }) = app.popup.take() {
-                        app.submit_edit_authors(&book_id, &input);
-                    }
-                }
-                KeyCode::Backspace => {
-                    if let Some(Popup::EditAuthors { ref mut input, ref mut cursor, .. }) = app.popup {
-                        if *cursor > 0 {
-                            let prev = input[..*cursor]
-                                .char_indices().last().map(|(i, _)| i).unwrap_or(0);
-                            input.remove(prev);
-                            *cursor = prev;
-                        }
-                    }
-                }
-                KeyCode::Left => {
-                    if let Some(Popup::EditAuthors { ref mut cursor, ref input, .. }) = app.popup {
-                        if *cursor > 0 {
-                            *cursor = input[..*cursor]
-                                .char_indices().last().map(|(i, _)| i).unwrap_or(0);
-                        }
-                    }
-                }
-                KeyCode::Right => {
-                    if let Some(Popup::EditAuthors { ref mut cursor, ref input, .. }) = app.popup {
-                        if *cursor < input.len() {
-                            *cursor = input[*cursor..]
-                                .char_indices().nth(1).map(|(i, _)| *cursor + i)
-                                .unwrap_or(input.len());
-                        }
-                    }
-                }
-                KeyCode::Char(c) => {
-                    if let Some(Popup::EditAuthors { ref mut input, ref mut cursor, .. }) = app.popup {
-                        input.insert(*cursor, c);
-                        *cursor += c.len_utf8();
-                    }
-                }
-                _ => {}
+        Some(Popup::EditAuthors { .. }) => match code {
+            KeyCode::Esc => {
+                app.popup = None;
             }
-        }
+            KeyCode::Enter => {
+                if let Some(Popup::EditAuthors { book_id, input, .. }) = app.popup.take() {
+                    app.submit_edit_authors(&book_id, &input);
+                }
+            }
+            KeyCode::Backspace => {
+                if let Some(Popup::EditAuthors {
+                    ref mut input,
+                    ref mut cursor,
+                    ..
+                }) = app.popup
+                {
+                    if *cursor > 0 {
+                        let prev = input[..*cursor]
+                            .char_indices()
+                            .last()
+                            .map(|(i, _)| i)
+                            .unwrap_or(0);
+                        input.remove(prev);
+                        *cursor = prev;
+                    }
+                }
+            }
+            KeyCode::Left => {
+                if let Some(Popup::EditAuthors {
+                    ref mut cursor,
+                    ref input,
+                    ..
+                }) = app.popup
+                {
+                    if *cursor > 0 {
+                        *cursor = input[..*cursor]
+                            .char_indices()
+                            .last()
+                            .map(|(i, _)| i)
+                            .unwrap_or(0);
+                    }
+                }
+            }
+            KeyCode::Right => {
+                if let Some(Popup::EditAuthors {
+                    ref mut cursor,
+                    ref input,
+                    ..
+                }) = app.popup
+                {
+                    if *cursor < input.len() {
+                        *cursor = input[*cursor..]
+                            .char_indices()
+                            .nth(1)
+                            .map(|(i, _)| *cursor + i)
+                            .unwrap_or(input.len());
+                    }
+                }
+            }
+            KeyCode::Char(c) => {
+                if let Some(Popup::EditAuthors {
+                    ref mut input,
+                    ref mut cursor,
+                    ..
+                }) = app.popup
+                {
+                    input.insert(*cursor, c);
+                    *cursor += c.len_utf8();
+                }
+            }
+            _ => {}
+        },
 
-        Some(Popup::AddTagPrompt { .. }) => {
-            match code {
-                KeyCode::Esc => { app.popup = None; }
-                KeyCode::Enter => {
-                    if let Some(Popup::AddTagPrompt { indices, input, .. }) = app.popup.take() {
-                        if !input.trim().is_empty() {
-                            app.add_tag_to_indices(&indices, &input);
-                        }
-                    }
-                }
-                KeyCode::Backspace => {
-                    if let Some(Popup::AddTagPrompt { ref mut input, ref mut cursor, .. }) = app.popup {
-                        if *cursor > 0 {
-                            let prev = input[..*cursor]
-                                .char_indices().last().map(|(i, _)| i).unwrap_or(0);
-                            input.remove(prev);
-                            *cursor = prev;
-                        }
-                    }
-                }
-                KeyCode::Char(c) => {
-                    if let Some(Popup::AddTagPrompt { ref mut input, ref mut cursor, .. }) = app.popup {
-                        input.insert(*cursor, c);
-                        *cursor += c.len_utf8();
-                    }
-                }
-                _ => {}
+        Some(Popup::AddTagPrompt { .. }) => match code {
+            KeyCode::Esc => {
+                app.popup = None;
             }
-        }
+            KeyCode::Enter => {
+                if let Some(Popup::AddTagPrompt { indices, input, .. }) = app.popup.take() {
+                    if !input.trim().is_empty() {
+                        app.add_tag_to_indices(&indices, &input);
+                    }
+                }
+            }
+            KeyCode::Backspace => {
+                if let Some(Popup::AddTagPrompt {
+                    ref mut input,
+                    ref mut cursor,
+                    ..
+                }) = app.popup
+                {
+                    if *cursor > 0 {
+                        let prev = input[..*cursor]
+                            .char_indices()
+                            .last()
+                            .map(|(i, _)| i)
+                            .unwrap_or(0);
+                        input.remove(prev);
+                        *cursor = prev;
+                    }
+                }
+            }
+            KeyCode::Char(c) => {
+                if let Some(Popup::AddTagPrompt {
+                    ref mut input,
+                    ref mut cursor,
+                    ..
+                }) = app.popup
+                {
+                    input.insert(*cursor, c);
+                    *cursor += c.len_utf8();
+                }
+            }
+            _ => {}
+        },
 
-        Some(Popup::RemoveTagPrompt { .. }) => {
-            match code {
-                KeyCode::Esc => { app.popup = None; }
-                KeyCode::Enter => {
-                    if let Some(Popup::RemoveTagPrompt { indices, available_tags, selected, .. }) = app.popup.take() {
-                        if let Some(tag) = available_tags.get(selected) {
-                            let tag = tag.clone();
-                            app.remove_tag_from_indices(&indices, &tag);
-                        }
-                    }
-                }
-                KeyCode::Char('j') | KeyCode::Down => {
-                    if let Some(Popup::RemoveTagPrompt { ref mut selected, ref available_tags, .. }) = app.popup {
-                        if *selected + 1 < available_tags.len() {
-                            *selected += 1;
-                        }
-                    }
-                }
-                KeyCode::Char('k') | KeyCode::Up => {
-                    if let Some(Popup::RemoveTagPrompt { ref mut selected, .. }) = app.popup {
-                        if *selected > 0 {
-                            *selected -= 1;
-                        }
-                    }
-                }
-                _ => {}
+        Some(Popup::RemoveTagPrompt { .. }) => match code {
+            KeyCode::Esc => {
+                app.popup = None;
             }
-        }
+            KeyCode::Enter => {
+                if let Some(Popup::RemoveTagPrompt {
+                    indices,
+                    available_tags,
+                    selected,
+                    ..
+                }) = app.popup.take()
+                {
+                    if let Some(tag) = available_tags.get(selected) {
+                        let tag = tag.clone();
+                        app.remove_tag_from_indices(&indices, &tag);
+                    }
+                }
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                if let Some(Popup::RemoveTagPrompt {
+                    ref mut selected,
+                    ref available_tags,
+                    ..
+                }) = app.popup
+                {
+                    if *selected + 1 < available_tags.len() {
+                        *selected += 1;
+                    }
+                }
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                if let Some(Popup::RemoveTagPrompt {
+                    ref mut selected, ..
+                }) = app.popup
+                {
+                    if *selected > 0 {
+                        *selected -= 1;
+                    }
+                }
+            }
+            _ => {}
+        },
 
         None => {}
     }
@@ -570,10 +661,10 @@ pub(crate) fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModif
 fn update_filepath_suggestions(form: &mut crate::popup::AddBookForm) {
     let field = &form.fields[5];
     let raw_val = &field.value;
-    
+
     let expanded_val = if raw_val.starts_with("~/") {
         if let Some(home) = dirs::home_dir() {
-             raw_val.replacen("~", &home.to_string_lossy(), 1)
+            raw_val.replacen("~", &home.to_string_lossy(), 1)
         } else {
             raw_val.clone()
         }
@@ -612,11 +703,11 @@ fn update_filepath_suggestions(form: &mut crate::popup::AddBookForm) {
             .filter(|name| name.starts_with(&prefix))
             .collect();
         match matches.len() {
-             0 => form.autocomplete.clear(),
-             _ => {
-                 matches.sort();
-                 form.autocomplete.activate(matches);
-             }
+            0 => form.autocomplete.clear(),
+            _ => {
+                matches.sort();
+                form.autocomplete.activate(matches);
+            }
         }
     } else {
         form.autocomplete.clear();
