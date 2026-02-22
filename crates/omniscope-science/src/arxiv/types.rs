@@ -42,6 +42,53 @@ pub struct ArxivSearchQuery {
 
 impl ArxivSearchQuery {
     pub fn to_query_string(&self) -> String {
-        todo!()
+        let mut parts = Vec::new();
+
+        let encode = |s: &str| s.replace(' ', "+");
+
+        if let Some(ref q) = self.all {
+            parts.push(format!("all:{}", encode(q)));
+        }
+        if let Some(ref q) = self.title {
+            parts.push(format!("ti:{}", encode(q)));
+        }
+        if let Some(ref q) = self.author {
+            parts.push(format!("au:{}", encode(q)));
+        }
+        if let Some(ref q) = self.abstract_text {
+            parts.push(format!("abs:{}", encode(q)));
+        }
+        if let Some(ref q) = self.category {
+            parts.push(format!("cat:{}", encode(q)));
+        }
+        if let Some(ref q) = self.journal {
+            parts.push(format!("jr:{}", encode(q)));
+        }
+
+        parts.join("+AND+")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_arxiv_query_string() {
+        let query = ArxivSearchQuery {
+            title: Some("attention is all you need".to_string()),
+            author: Some("Vaswani".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(query.to_query_string(), "ti:attention+is+all+you+need+AND+au:Vaswani");
+    }
+
+    #[test]
+    fn test_arxiv_query_all() {
+        let query = ArxivSearchQuery {
+            all: Some("electron".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(query.to_query_string(), "all:electron");
     }
 }
