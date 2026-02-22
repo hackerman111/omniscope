@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 use crate::identifiers::{arxiv::ArxivId, doi::Doi};
+use crate::sources::Metadata;
+use chrono::{Datelike, DateTime, Utc};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ArxivMetadata {
@@ -8,8 +10,8 @@ pub struct ArxivMetadata {
     pub title: String,
     pub authors: Vec<ArxivAuthor>,
     pub abstract_text: String,
-    pub published: chrono::DateTime<chrono::Utc>,
-    pub updated: chrono::DateTime<chrono::Utc>,
+    pub published: DateTime<Utc>,
+    pub updated: DateTime<Utc>,
     pub categories: Vec<String>,
     pub primary_category: String,
     pub comment: Option<String>,
@@ -66,6 +68,24 @@ impl ArxivSearchQuery {
         }
 
         parts.join("+AND+")
+    }
+}
+
+impl ArxivMetadata {
+    pub fn into_metadata(self) -> Metadata {
+        Metadata {
+            title: self.title,
+            authors: self.authors.into_iter().map(|a| a.name).collect(),
+            year: Some(self.published.year()),
+            abstract_text: Some(self.abstract_text),
+            doi: self.doi.map(|d| d.normalized),
+            isbn: None,
+            publisher: None,
+            journal: self.journal_ref,
+            volume: None,
+            issue: None,
+            pages: None,
+        }
     }
 }
 

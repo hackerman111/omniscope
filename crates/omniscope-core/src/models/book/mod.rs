@@ -14,7 +14,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::{BookCitationGraph, BookPublication, ScientificIdentifiers};
+use super::{BookCitationGraph, BookPublication, ScientificIdentifiers, OpenAccessInfo};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BookCard {
@@ -30,6 +30,9 @@ pub struct BookCard {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub publication: Option<BookPublication>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub open_access: Option<OpenAccessInfo>,
 
     #[serde(default)]
     pub citation_graph: BookCitationGraph,
@@ -61,6 +64,7 @@ impl BookCard {
             metadata: BookMetadata::new(title),
             identifiers: None,
             publication: None,
+            open_access: None,
             citation_graph: BookCitationGraph::default(),
             file: None,
             organization: BookOrganization::default(),

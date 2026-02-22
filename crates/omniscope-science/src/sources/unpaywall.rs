@@ -4,6 +4,7 @@ use crate::error::Result;
 use crate::http::{RateLimitedClient, DiskCache};
 use crate::sources::{ExternalSource, SourceType, RateLimit, SearchResult, Metadata, DownloadUrl, SourceStatus};
 use crate::identifiers::doi::Doi;
+use omniscope_core::models::OpenAccessInfo;
 use async_trait::async_trait;
 
 pub struct UnpaywallSource {
@@ -137,6 +138,35 @@ impl UnpaywallResult {
         self.best_oa_location.as_ref()
             .and_then(|loc| loc.url_for_pdf.as_deref().or(Some(&loc.url)))
     }
+
+    pub fn into_oa_info(self) -> OpenAccessInfo {
+        let mut pdf_urls = Vec::new();
+        
+        // Collect URLs
+        if let Some(best) = &self.best_oa_location {
+            if let Some(pdf) = &best.url_for_pdf {
+                pdf_urls.push(pdf.clone());
+            } else {
+                pdf_urls.push(best.url.clone());
+            }
+        }
+        
+        for loc in &self.oa_locations {
+            if let Some(pdf) = &loc.url_for_pdf {
+                if !pdf_urls.contains(pdf) {
+                    pdf_urls.push(pdf.clone());
+                }
+            }
+        }
+
+        OpenAccessInfo {
+            is_open: self.is_oa,
+            status: Some(self.oa_status),
+            license: self.best_oa_location.as_ref().and_then(|l| l.license.clone()),
+            oa_url: self.best_oa_location.map(|l| l.url),
+            pdf_urls,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -161,7 +191,8 @@ mod tests {
                     "url": "https://example.com/paper.pdf",
                     "url_for_pdf": "https://example.com/paper.pdf",
                     "host_type": "publisher",
-                    "version": "publishedVersion"
+                    "version": "publishedVersion",
+                    "license": "cc-by"
                 },
                 "oa_locations": [],
                 "updated": "2023-01-01T00:00:00Z",
@@ -180,5 +211,9 @@ mod tests {
         assert!(result.is_oa);
         assert_eq!(result.oa_status, "gold");
         assert_eq!(result.best_pdf_url().unwrap(), "https://example.com/paper.pdf");
+        
+        let info = result.into_oa_info();
+        assert!(info.is_open);
+        assert_eq!(info.license.as_deref(), Some("cc-by"));
     }
 }
