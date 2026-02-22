@@ -34,6 +34,9 @@ pub enum ScienceError {
 
     #[error("cache error: {0}")]
     Cache(String),
+
+    #[error("identifier not found: {0}")]
+    IdentifierNotFound(String),
 }
 
 pub type Result<T> = std::result::Result<T, ScienceError>;
