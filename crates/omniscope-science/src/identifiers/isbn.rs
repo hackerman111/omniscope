@@ -16,14 +16,14 @@ fn strip_isbn(input: &str) -> String {
 fn check_isbn10(digits: &[u8]) -> bool {
     // digits[9] may be 10 (X)
     let sum: u32 = digits.iter().enumerate().map(|(i, &d)| (10 - i as u32) * d as u32).sum();
-    sum % 11 == 0
+    sum.is_multiple_of(11)
 }
 
 fn check_isbn13(digits: &[u8]) -> bool {
     let sum: u32 = digits.iter().enumerate().map(|(i, &d)| {
         if i % 2 == 0 { d as u32 } else { d as u32 * 3 }
     }).sum();
-    sum % 10 == 0
+    sum.is_multiple_of(10)
 }
 
 fn isbn10_to_isbn13(digits10: &[u8]) -> String {

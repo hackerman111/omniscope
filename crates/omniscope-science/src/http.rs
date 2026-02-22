@@ -1,6 +1,6 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -52,6 +52,15 @@ impl RateLimitedClient {
     }
 
     pub async fn get_with_headers(&self, url: &str, headers: HeaderMap) -> Result<String> {
+        let resp = self.get_response_inner(url, headers).await?;
+        resp.text().await.map_err(ScienceError::Http)
+    }
+
+    pub async fn get_response(&self, url: &str) -> Result<reqwest::Response> {
+        self.get_response_inner(url, HeaderMap::new()).await
+    }
+
+    async fn get_response_inner(&self, url: &str, headers: HeaderMap) -> Result<reqwest::Response> {
         let mut attempt = 0u32;
         loop {
             self.wait_for_rate_limit().await;
@@ -72,13 +81,15 @@ impl RateLimitedClient {
                 }
                 Ok(r) if !r.status().is_success() => {
                     let status = r.status().as_u16();
+                    // We can't consume the body here if we want to return response for download in other cases?
+                    // But here we are in error block.
                     let body = r.text().await.unwrap_or_default();
                     return Err(ScienceError::ApiError(
                         url.to_string(),
                         format!("HTTP {status}: {body}"),
                     ));
                 }
-                Ok(r) => return r.text().await.map_err(ScienceError::Http),
+                Ok(r) => return Ok(r),
                 Err(e) => {
                     if attempt >= self.max_retries {
                         return Err(ScienceError::Http(e));
@@ -126,7 +137,7 @@ pub struct DiskCache {
     ttl: Duration,
 }
 
-fn cache_key_to_path(dir: &PathBuf, key: &str) -> PathBuf {
+fn cache_key_to_path(dir: &Path, key: &str) -> PathBuf {
     let mut hasher = DefaultHasher::new();
     key.hash(&mut hasher);
     let hash = hasher.finish();

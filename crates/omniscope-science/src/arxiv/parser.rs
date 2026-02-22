@@ -71,7 +71,7 @@ pub fn parse_atom_response(xml: &str) -> Result<Vec<ArxivMetadata>> {
 
     for entry in feed.entries {
         // Extract ArXiv ID from URL like http://arxiv.org/abs/1706.03762v5
-        let raw_id = entry.id.split('/').last().unwrap_or(&entry.id);
+        let raw_id = entry.id.split('/').next_back().unwrap_or(&entry.id);
         let arxiv_id = ArxivId::parse(raw_id)?;
 
         let doi = if let Some(d) = entry.doi {
