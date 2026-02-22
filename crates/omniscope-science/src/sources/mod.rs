@@ -1,5 +1,32 @@
+use crate::error::Result;
+use async_trait::async_trait;
+
+#[async_trait]
 pub trait ExternalSource: Send + Sync {
-    fn name(&self) -> &str;
+    fn name() -> &'static str where Self: Sized;
+    fn source_type() -> SourceType where Self: Sized;
+    fn requires_auth() -> bool where Self: Sized;
+    fn rate_limit() -> RateLimit where Self: Sized;
+
+    async fn search(&self, query: &str) -> Result<Vec<SearchResult>>;
+    async fn fetch_metadata(&self, id: &str) -> Result<Option<Metadata>>;
+    async fn find_download_url(&self, id: &str) -> Result<Option<DownloadUrl>>;
+    async fn health_check(&self) -> SourceStatus;
+}
+
+#[derive(Debug, Clone)]
+pub struct Metadata {
+    pub title: String,
+    pub authors: Vec<String>,
+    pub year: Option<i32>,
+    pub abstract_text: Option<String>,
+    pub doi: Option<String>,
+    pub isbn: Option<String>,
+    pub publisher: Option<String>,
+    pub journal: Option<String>,
+    pub volume: Option<String>,
+    pub issue: Option<String>,
+    pub pages: Option<String>,
 }
 
 pub struct SearchResult {
