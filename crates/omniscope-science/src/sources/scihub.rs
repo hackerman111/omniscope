@@ -182,16 +182,15 @@ impl ExternalSource for SciHubSource {
     }
 
     async fn find_download_url(&self, id: &str) -> Result<Option<DownloadUrl>> {
-        if let Ok(doi) = Doi::parse(id) {
-            if let Ok(Some(info)) = self.fetch_by_doi(&doi).await {
-                if let Some(url) = info.pdf_url {
-                    return Ok(Some(DownloadUrl {
-                        url,
-                        source_name: "SciHub".to_string(),
-                        requires_redirect: true,
-                    }));
-                }
-            }
+        if let Ok(doi) = Doi::parse(id)
+            && let Ok(Some(info)) = self.fetch_by_doi(&doi).await
+            && let Some(url) = info.pdf_url
+        {
+            return Ok(Some(DownloadUrl {
+                url,
+                source_name: "SciHub".to_string(),
+                requires_redirect: true,
+            }));
         }
         Ok(None)
     }

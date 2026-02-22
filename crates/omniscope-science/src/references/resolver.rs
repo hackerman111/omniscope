@@ -45,7 +45,7 @@ impl ExtractedReference {
     }
 }
 
-pub async fn resolve_unidentified(refs: &mut Vec<ExtractedReference>, crossref: &CrossRefSource) {
+pub async fn resolve_unidentified(refs: &mut [ExtractedReference], crossref: &CrossRefSource) {
     let mut queries = Vec::new();
 
     for (i, reference) in refs.iter().enumerate() {
@@ -63,12 +63,12 @@ pub async fn resolve_unidentified(refs: &mut Vec<ExtractedReference>, crossref: 
         .buffer_unordered(3);
 
     while let Some((i, result)) = stream.next().await {
-        if let Ok(Some((doi, score))) = result {
-            if let Some(r) = refs.get_mut(i) {
-                r.doi = Some(doi);
-                r.confidence = score / 100.0;
-                r.resolution_method = ResolutionMethod::CrossRefQuery;
-            }
+        if let Ok(Some((doi, score))) = result
+            && let Some(r) = refs.get_mut(i)
+        {
+            r.doi = Some(doi);
+            r.confidence = score / 100.0;
+            r.resolution_method = ResolutionMethod::CrossRefQuery;
         }
     }
 }

@@ -57,7 +57,8 @@ impl SemanticScholarSource {
             return Ok(cached);
         }
 
-        let fields = "title,authors,year,abstract,externalIds,citationCount,referenceCount,influentialCitationCount,fieldsOfStudy,isOpenAccess,openAccessPdf,tldr";
+        // Added citations and references to fields
+        let fields = "title,authors,year,abstract,externalIds,citationCount,referenceCount,influentialCitationCount,fieldsOfStudy,isOpenAccess,openAccessPdf,tldr,references,citations";
         let url = format!("{}/paper/{}?fields={}", self.base_url, id, fields);
         
         let text = self.client.get_with_headers(&url, self.get_headers()).await?;
@@ -72,7 +73,6 @@ impl SemanticScholarSource {
             return Ok(Vec::new());
         }
         
-        // Semantic Scholar batch API: POST /paper/batch
         let url = format!("{}/paper/batch?fields=title,authors,year,externalIds,citationCount", self.base_url);
         let body = json!({ "ids": ids });
         
@@ -131,7 +131,7 @@ impl ExternalSource for SemanticScholarSource {
                     year,
                     identifier,
                     source: "SemanticScholar".to_string(),
-                    relevance_score: 0.0, // S2 search result doesn't explicitly return score in simple search
+                    relevance_score: 0.0, 
                 });
             }
         }
@@ -190,6 +190,22 @@ pub struct S2Paper {
     pub is_open_access: bool,
     pub open_access_pdf: Option<S2OpenAccessPdf>,
     pub tldr: Option<S2Tldr>,
+    #[serde(default)]
+    pub references: Vec<S2PaperRef>,
+    #[serde(default)]
+    pub citations: Vec<S2PaperRef>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct S2PaperRef {
+    pub paper_id: String,
+    #[serde(default)]
+    pub external_ids: HashMap<String, String>,
+    pub title: Option<String>,
+    pub year: Option<i32>,
+    #[serde(default)]
+    pub authors: Vec<S2Author>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -238,7 +254,7 @@ mod tests {
         let mut server = Server::new_async().await;
         let base_url = server.url();
 
-        let _m = server.mock("GET", "/paper/DOI:10.1038/nature14539?fields=title,authors,year,abstract,externalIds,citationCount,referenceCount,influentialCitationCount,fieldsOfStudy,isOpenAccess,openAccessPdf,tldr")
+        let _m = server.mock("GET", "/paper/DOI:10.1038/nature14539?fields=title,authors,year,abstract,externalIds,citationCount,referenceCount,influentialCitationCount,fieldsOfStudy,isOpenAccess,openAccessPdf,tldr,references,citations")
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_body(r#"{
@@ -252,7 +268,9 @@ mod tests {
                 ],
                 "citationCount": 1000,
                 "isOpenAccess": true,
-                "tldr": {"text": "TLDR of the paper"}
+                "tldr": {"text": "TLDR of the paper"},
+                "references": [],
+                "citations": []
             }"#)
             .create_async().await;
 

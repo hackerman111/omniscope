@@ -206,16 +206,16 @@ fn parse_format_from_meta(text: &str) -> String {
 }
 
 fn parse_size_from_meta(text: &str) -> f64 {
-    if let Some(caps) = SIZE_REGEX.captures(text) {
-        if let Some(val) = caps.get(1).and_then(|m| m.as_str().parse::<f64>().ok()) {
-            let unit = caps.get(3).map(|m| m.as_str()).unwrap_or("");
-            return match unit {
-                "GB" => val * 1024.0,
-                "MB" => val,
-                "KB" => val / 1024.0,
-                _ => val,
-            };
-        }
+    if let Some(caps) = SIZE_REGEX.captures(text)
+        && let Some(val) = caps.get(1).and_then(|m| m.as_str().parse::<f64>().ok())
+    {
+        let unit = caps.get(3).map(|m| m.as_str()).unwrap_or("");
+        return match unit {
+            "GB" => val * 1024.0,
+            "MB" => val,
+            "KB" => val / 1024.0,
+            _ => val,
+        };
     }
     0.0
 }
