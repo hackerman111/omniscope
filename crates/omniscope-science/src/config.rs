@@ -45,6 +45,8 @@ pub struct CitationGraphConfig {
 
 impl ScienceConfig {
     pub fn load() -> crate::error::Result<Self> {
-        todo!()
+        // In a real app, this would load from a file (e.g., ~/.config/omniscope/science.toml)
+        // For now, return default.
+        Ok(Self::default())
     }
 }

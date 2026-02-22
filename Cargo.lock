@@ -1875,6 +1875,7 @@ dependencies = [
  "chrono",
  "clap",
  "omniscope-core",
+ "omniscope-science",
  "omniscope-tui",
  "serde_json",
  "tokio",

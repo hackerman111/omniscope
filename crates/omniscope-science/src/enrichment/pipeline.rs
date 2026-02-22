@@ -11,9 +11,14 @@ use crate::identifiers::isbn::Isbn;
 use crate::enrichment::merge::{MetadataSource, MergeStrategy, MergeMetadata};
 use omniscope_core::models::book::BookCard;
 use omniscope_core::models::ScientificIdentifiers;
+use crate::config::ScienceConfig;
 
-#[derive(Debug, Default)]
+use serde::Serialize;
+
+#[derive(Debug, Default, Serialize)]
 pub struct EnrichmentReport {
+// ...
+// (rest of the file)
     pub steps: Vec<String>,
     pub fields_updated: Vec<String>,
     pub sources_used: Vec<String>,
@@ -46,6 +51,19 @@ impl EnrichmentPipeline {
             openlibrary,
             arxiv_client,
         }
+    }
+
+    pub fn default_with_config(config: &ScienceConfig) -> Self {
+        let email = config.polite_pool_email.clone();
+        
+        let crossref = Arc::new(CrossRefSource::new(email.clone()));
+        let s2 = Arc::new(SemanticScholarSource::new(config.semantic_scholar_api_key.clone()));
+        let openalex = Arc::new(OpenAlexSource::new());
+        let unpaywall = Arc::new(UnpaywallSource::new(email.unwrap_or_else(|| "test@example.com".to_string())));
+        let openlibrary = Arc::new(OpenLibrarySource::new());
+        let arxiv_client = Arc::new(ArxivClient::new());
+
+        Self::new(crossref, s2, openalex, unpaywall, openlibrary, arxiv_client)
     }
 
     pub async fn enrich(&self, card: &mut BookCard) -> EnrichmentReport {

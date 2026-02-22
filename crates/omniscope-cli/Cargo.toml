@@ -12,6 +12,7 @@ path = "src/main.rs"
 [dependencies]
 omniscope-core = { workspace = true }
 omniscope-tui = { workspace = true }
+omniscope-science = { workspace = true }
 clap = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }

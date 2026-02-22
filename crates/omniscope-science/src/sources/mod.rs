@@ -29,6 +29,9 @@ pub struct Metadata {
     pub pages: Option<String>,
 }
 
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchResult {
     pub title: String,
     pub authors: Vec<String>,
@@ -38,6 +41,7 @@ pub struct SearchResult {
     pub relevance_score: f32,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DownloadUrl {
     pub url: String,
     pub source_name: String,

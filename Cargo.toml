@@ -50,6 +50,7 @@ dirs = "6"
 # Internal crates
 omniscope-core = { path = "crates/omniscope-core" }
 omniscope-tui = { path = "crates/omniscope-tui" }
+omniscope-science = { path = "crates/omniscope-science" }
 
 [profile.release]
 opt-level = 3
