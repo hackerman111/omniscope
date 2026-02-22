@@ -39,9 +39,38 @@ pub(crate) fn handle_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) 
         return;
     }
 
+    // Handle Tab to toggle Left Panel Mode globally if we're in Normal or Visual mode
+    if code == KeyCode::Tab && modifiers.is_empty() && (app.mode == Mode::Normal || matches!(app.mode, Mode::Visual | Mode::VisualLine | Mode::VisualBlock)) {
+        if app.left_panel_mode == crate::app::LeftPanelMode::LibraryView {
+            app.left_panel_mode = crate::app::LeftPanelMode::FolderTree;
+        } else {
+            app.left_panel_mode = crate::app::LeftPanelMode::LibraryView;
+        }
+        app.refresh_sidebar();
+        // Keep focus on sidebar
+        app.active_panel = crate::app::ActivePanel::Sidebar;
+        return;
+    }
+
     match app.mode {
-        Mode::Normal => modes::normal::handle_normal_mode(app, code, modifiers),
-        Mode::Visual | Mode::VisualLine | Mode::VisualBlock => modes::visual::handle_visual_mode(app, code, modifiers),
+        Mode::Normal => {
+            if app.active_panel == crate::app::ActivePanel::Sync {
+                modes::sync::handle_sync_mode(app, code, modifiers);
+            } else if app.active_panel == crate::app::ActivePanel::Sidebar && app.left_panel_mode == crate::app::LeftPanelMode::FolderTree {
+                modes::folder::handle_folder_mode(app, code, modifiers);
+            } else {
+                modes::normal::handle_normal_mode(app, code, modifiers);
+            }
+        },
+        Mode::Visual | Mode::VisualLine | Mode::VisualBlock => {
+            if app.active_panel == crate::app::ActivePanel::Sync {
+                modes::sync::handle_sync_mode(app, code, modifiers);
+            } else if app.active_panel == crate::app::ActivePanel::Sidebar && app.left_panel_mode == crate::app::LeftPanelMode::FolderTree {
+                modes::folder::handle_folder_mode(app, code, modifiers);
+            } else {
+                modes::visual::handle_visual_mode(app, code, modifiers);
+            }
+        },
         Mode::Pending => modes::pending::handle_pending_mode(app, code, modifiers),
         Mode::Command => modes::command_mode::handle_command_mode(app, code),
         Mode::Search => modes::search::handle_search_mode(app, code),

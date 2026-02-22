@@ -149,133 +149,7 @@ pub fn create_folder_on_disk(
     db.create_folder_with_path(folder_name, parent_id, None, path)
 }
 
-// ─── Sync ──────────────────────────────────────────────────
-
-/// Result of synchronizing disk state with database state.
-#[derive(Debug, Clone, Default)]
-pub struct SyncReport {
-    /// Folders that exist on disk but not in the database.
-    pub new_on_disk: Vec<String>,
-    /// Folders in the database that no longer exist on disk.
-    pub missing_on_disk: Vec<String>,
-    /// Folders that are in sync.
-    pub in_sync: usize,
-    /// Files on disk that have no card in the library.
-    pub untracked_files: Vec<PathBuf>,
-}
-
-impl SyncReport {
-    /// True if everything is in sync.
-    pub fn is_clean(&self) -> bool {
-        self.new_on_disk.is_empty()
-            && self.missing_on_disk.is_empty()
-            && self.untracked_files.is_empty()
-    }
-}
-
-/// Scan the library directory tree and compare with the database.
-///
-/// Ignores the `.libr/` directory itself.
-pub fn sync_folders(library: &LibraryRoot, db: &Database) -> Result<SyncReport> {
-    let root = library.root();
-
-    // 1. Discover directories on disk (relative paths)
-    let disk_folders = scan_disk_directories(root)?;
-
-    // 2. Get folders from DB
-    let db_folders = db.list_all_folder_paths()?;
-    let db_set: HashSet<String> = db_folders.into_iter().collect();
-
-    let mut report = SyncReport::default();
-
-    for folder in &disk_folders {
-        if db_set.contains(folder) {
-            report.in_sync += 1;
-        } else {
-            report.new_on_disk.push(folder.clone());
-        }
-    }
-
-    let disk_set: HashSet<&str> = disk_folders.iter().map(|s| s.as_str()).collect();
-    for db_folder in db_set.iter() {
-        if !disk_set.contains(db_folder.as_str()) {
-            report.missing_on_disk.push(db_folder.clone());
-        }
-    }
-
-    // 3. Find untracked files
-    report.untracked_files = scan_untracked_files(library, db)?;
-
-    Ok(report)
-}
-
-/// Discover all subdirectories under `root`, returning relative paths.
-/// Ignores `.libr/` and hidden directories.
-fn scan_disk_directories(root: &Path) -> Result<Vec<String>> {
-    let mut result = Vec::new();
-    scan_dirs_recursive(root, root, &mut result)?;
-    Ok(result)
-}
-
-fn scan_dirs_recursive(root: &Path, current: &Path, result: &mut Vec<String>) -> Result<()> {
-    let entries = match std::fs::read_dir(current) {
-        Ok(entries) => entries,
-        Err(_) => return Ok(()),
-    };
-
-    for entry in entries {
-        let entry = entry?;
-        let path = entry.path();
-
-        if !path.is_dir() {
-            continue;
-        }
-
-        let name = entry.file_name();
-        let name_str = name.to_string_lossy();
-
-        // Skip hidden directories and .libr/
-        if name_str.starts_with('.') {
-            continue;
-        }
-
-        // Get relative path
-        if let Ok(rel) = path.strip_prefix(root) {
-            let rel_str = rel.to_string_lossy().to_string();
-            // Normalize to forward slashes
-            let rel_str = rel_str.replace('\\', "/");
-            result.push(rel_str);
-        }
-
-        // Recurse
-        scan_dirs_recursive(root, &path, result)?;
-    }
-
-    Ok(())
-}
-
-/// Find files on disk that have no corresponding card in the database.
-fn scan_untracked_files(library: &LibraryRoot, db: &Database) -> Result<Vec<PathBuf>> {
-    let root = library.root();
-
-    // Get all tracked file paths from DB
-    let tracked = db.list_all_file_paths()?;
-    let tracked_set: HashSet<String> = tracked.into_iter().collect();
-
-    // Scan all book files on disk
-    let disk_files = file_import::scan_directory(root, true)?;
-
-    let mut untracked = Vec::new();
-    for card in &disk_files {
-        if let Some(ref file) = card.file {
-            if !tracked_set.contains(&file.path) {
-                untracked.push(PathBuf::from(&file.path));
-            }
-        }
-    }
-
-    Ok(untracked)
-}
+// ─── Tests ─────────────────────────────────────────────────
 
 // ─── Tests ─────────────────────────────────────────────────
 
@@ -283,6 +157,7 @@ fn scan_untracked_files(library: &LibraryRoot, db: &Database) -> Result<Vec<Path
 mod tests {
     use super::*;
     use crate::storage::init::{init_library, InitOptions};
+    use crate::sync::FolderSync;
     use tempfile::TempDir;
 
     #[test]
@@ -370,8 +245,8 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let lr = init_library(tmp.path(), InitOptions::minimal()).unwrap();
         let db = Database::open(&lr.database_path()).unwrap();
-
-        let report = sync_folders(&lr, &db).unwrap();
+        let sync = FolderSync::new(&lr, &db);
+        let report = sync.full_scan().unwrap();
         assert!(report.is_clean());
     }
 
@@ -383,8 +258,8 @@ mod tests {
 
         // Create a folder on disk NOT through the API
         std::fs::create_dir_all(tmp.path().join("mystery-folder")).unwrap();
-
-        let report = sync_folders(&lr, &db).unwrap();
+        let sync = FolderSync::new(&lr, &db);
+        let report = sync.full_scan().unwrap();
         assert!(report.new_on_disk.contains(&"mystery-folder".to_string()));
     }
 
@@ -399,8 +274,8 @@ mod tests {
         assert!(tmp.path().join("will-delete").is_dir());
 
         std::fs::remove_dir(tmp.path().join("will-delete")).unwrap();
-
-        let report = sync_folders(&lr, &db).unwrap();
+        let sync = FolderSync::new(&lr, &db);
+        let report = sync.full_scan().unwrap();
         assert!(report.missing_on_disk.contains(&"will-delete".to_string()));
     }
 
@@ -411,8 +286,8 @@ mod tests {
         let db = Database::open(&lr.database_path()).unwrap();
 
         create_folder_on_disk(&lr, &db, "synced-folder", None).unwrap();
-
-        let report = sync_folders(&lr, &db).unwrap();
+        let sync = FolderSync::new(&lr, &db);
+        let report = sync.full_scan().unwrap();
         assert_eq!(report.in_sync, 1);
         assert!(report.new_on_disk.is_empty());
         assert!(report.missing_on_disk.is_empty());
@@ -426,8 +301,8 @@ mod tests {
 
         // Create a book file that has no card
         std::fs::write(tmp.path().join("untracked-book.pdf"), b"fake pdf").unwrap();
-
-        let report = sync_folders(&lr, &db).unwrap();
+        let sync = FolderSync::new(&lr, &db);
+        let report = sync.full_scan().unwrap();
         assert!(!report.untracked_files.is_empty());
     }
 
@@ -441,8 +316,8 @@ mod tests {
         // Create another hidden dir
         std::fs::create_dir_all(tmp.path().join(".hidden")).unwrap();
         std::fs::create_dir_all(tmp.path().join("visible")).unwrap();
-
-        let report = sync_folders(&lr, &db).unwrap();
+        let sync = FolderSync::new(&lr, &db);
+        let report = sync.full_scan().unwrap();
         // .hidden and .libr should not appear
         assert!(!report.new_on_disk.iter().any(|d| d.starts_with('.')));
         assert!(report.new_on_disk.contains(&"visible".to_string()));

@@ -1,10 +1,10 @@
-use crossterm::event::{KeyCode, KeyModifiers};
 use crate::app::{App, Mode};
 use crate::keys::core::motions;
-use crate::keys::ext::find_char;
-use crate::keys::core::text_objects::{self, TextObjectKind};
-use crate::keys::core::operator::Operator;
 use crate::keys::core::operator::execute_operator;
+use crate::keys::core::operator::Operator;
+use crate::keys::core::text_objects::{self, TextObjectKind};
+use crate::keys::ext::find_char;
+use crossterm::event::{KeyCode, KeyModifiers};
 
 pub(crate) fn handle_pending_mode(app: &mut App, code: KeyCode, _modifiers: KeyModifiers) {
     let operator = match app.pending_operator {
@@ -31,85 +31,30 @@ pub(crate) fn handle_pending_mode(app: &mut App, code: KeyCode, _modifiers: KeyM
             let start = app.selected_index;
             let end = (start + count - 1).min(app.books.len().saturating_sub(1));
             let range: Vec<usize> = (start..=end).collect();
-            
+
             execute_operator(app, operator, range);
             app.reset_vim_count();
             app.mode = Mode::Normal;
             return;
         }
 
-        // 1.5 Handle Quick Edits for Change ('c')
-        if operator == Operator::Change {
-             match c {
-                  'a' => { // change authors
-                       app.reset_vim_count();
-                       app.mode = Mode::Normal;
-                       if let Some(book) = app.selected_book() {
-                            let id = book.id.to_string();
-                            let current = book.authors.join(", ");
-                            app.popup = Some(crate::popup::Popup::EditAuthors {
-                                book_id: id,
-                                input: current.clone(),
-                                cursor: current.len(),
-                            });
-                       }
-                       app.status_message = "Quick edit: Authors".to_string();
-                       return;
-                  }
-                  't' | 'T' => { // change tags / title
-                       app.reset_vim_count();
-                       app.mode = Mode::Normal;
-                       app.open_edit_tags();
-                       app.status_message = "Quick edit: Tags".to_string();
-                       return;
-                  }
-                  'r' | 'R' => { // change rating
-                       app.reset_vim_count();
-                       app.mode = Mode::Normal;
-                       app.popup = Some(crate::popup::Popup::SetRating {
-                            id: app.selected_book().map(|b| b.id.to_string()).unwrap_or_default(),
-                            current: app.selected_book().and_then(|b| b.rating),
-                       });
-                       return;
-                  }
-                  's' => { // change status (cycle)
-                       app.reset_vim_count();
-                       app.mode = Mode::Normal;
-                       app.cycle_status();
-                       app.status_message = "Quick edit: Status cycled".to_string();
-                       return;
-                  }
-                  'y' => { // change year
-                       app.reset_vim_count();
-                       app.mode = Mode::Normal;
-                       if let Some(book) = app.selected_book() {
-                            let id = book.id.to_string();
-                            let year_str = book.year.map_or(String::new(), |y| y.to_string());
-                            app.popup = Some(crate::popup::Popup::EditYear {
-                                book_id: id,
-                                input: year_str.clone(),
-                                cursor: year_str.len(),
-                            });
-                       }
-                       app.status_message = "Quick edit: Year".to_string();
-                       return;
-                  }
-                  'n' => { // change notes (not available yet, status message)
-                       app.reset_vim_count();
-                       app.mode = Mode::Normal;
-                       app.status_message = "Quick edit: Notes (not yet implemented)".to_string();
-                       return;
-                  }
-                  _ => {}
-             }
+        // 1.5 Handle text object prefix FIRST (i or a)
+        // This must come before quick edits to allow `cab`, `cat`, `cal`, etc.
+        if (c == 'i' || c == 'a') && app.pending_key.is_none() {
+            app.pending_key = Some(c);
+            return;
         }
 
-        // 2. Handle Text Objects (prefix `i` or `a`)
+        // 1.6 Handle pending text object (e.g., after 'i' or 'a')
         if let Some(pending) = app.pending_key {
             if pending == 'i' || pending == 'a' {
                 app.pending_key = None;
-                let kind = if pending == 'i' { TextObjectKind::Inner } else { TextObjectKind::Around };
-                
+                let kind = if pending == 'i' {
+                    TextObjectKind::Inner
+                } else {
+                    TextObjectKind::Around
+                };
+
                 if let Some(range) = text_objects::get_text_object_range(app, c, kind) {
                     execute_operator(app, operator, range);
                 }
@@ -117,8 +62,85 @@ pub(crate) fn handle_pending_mode(app: &mut App, code: KeyCode, _modifiers: KeyM
                 app.mode = Mode::Normal;
                 return;
             }
-            
-            // If we were waiting for 'g' (e.g. `dg...`)
+        }
+
+        // 1.7 Handle Quick Edits for Change ('c') - after text objects
+        if operator == Operator::Change {
+            match c {
+                'A' => {
+                    // change authors (Shift+a to avoid conflict with text object 'a')
+                    app.reset_vim_count();
+                    app.mode = Mode::Normal;
+                    if let Some(book) = app.selected_book() {
+                        let id = book.id.to_string();
+                        let current = book.authors.join(", ");
+                        app.popup = Some(crate::popup::Popup::EditAuthors {
+                            book_id: id,
+                            input: current.clone(),
+                            cursor: current.len(),
+                        });
+                    }
+                    app.status_message = "Quick edit: Authors".to_string();
+                    return;
+                }
+                't' | 'T' => {
+                    // change tags / title
+                    app.reset_vim_count();
+                    app.mode = Mode::Normal;
+                    app.open_edit_tags();
+                    app.status_message = "Quick edit: Tags".to_string();
+                    return;
+                }
+                'r' | 'R' => {
+                    // change rating
+                    app.reset_vim_count();
+                    app.mode = Mode::Normal;
+                    app.popup = Some(crate::popup::Popup::SetRating {
+                        id: app
+                            .selected_book()
+                            .map(|b| b.id.to_string())
+                            .unwrap_or_default(),
+                        current: app.selected_book().and_then(|b| b.rating),
+                    });
+                    return;
+                }
+                's' => {
+                    // change status (cycle)
+                    app.reset_vim_count();
+                    app.mode = Mode::Normal;
+                    app.cycle_status();
+                    app.status_message = "Quick edit: Status cycled".to_string();
+                    return;
+                }
+                'y' => {
+                    // change year
+                    app.reset_vim_count();
+                    app.mode = Mode::Normal;
+                    if let Some(book) = app.selected_book() {
+                        let id = book.id.to_string();
+                        let year_str = book.year.map_or(String::new(), |y| y.to_string());
+                        app.popup = Some(crate::popup::Popup::EditYear {
+                            book_id: id,
+                            input: year_str.clone(),
+                            cursor: year_str.len(),
+                        });
+                    }
+                    app.status_message = "Quick edit: Year".to_string();
+                    return;
+                }
+                'n' => {
+                    // change notes (not available yet, status message)
+                    app.reset_vim_count();
+                    app.mode = Mode::Normal;
+                    app.status_message = "Quick edit: Notes (not yet implemented)".to_string();
+                    return;
+                }
+                _ => {}
+            }
+        }
+
+        // 2. Handle pending 'g' (e.g. `dg...`)
+        if let Some(pending) = app.pending_key {
             if pending == 'g' {
                 app.pending_key = None;
                 if c == 'g' {
@@ -144,16 +166,16 @@ pub(crate) fn handle_pending_mode(app: &mut App, code: KeyCode, _modifiers: KeyM
                 return;
             }
         }
-        
-        // If no pending key, checking for start of text object or special motion prefix
-        if (c == 'i' || c == 'a' || c == 'f' || c == 'F' || c == 't' || c == 'T') && app.pending_key.is_none() {
+
+        // 3. Handle special motion prefixes (f, F, t, T, g)
+        if (c == 'f' || c == 'F' || c == 't' || c == 'T') && app.pending_key.is_none() {
             app.pending_key = Some(c);
             return;
         }
-        
+
         if c == 'g' && app.pending_key.is_none() {
-             app.pending_key = Some('g');
-             return;
+            app.pending_key = Some('g');
+            return;
         }
 
         // 3. Handle Digit (accumulate count)
@@ -165,7 +187,7 @@ pub(crate) fn handle_pending_mode(app: &mut App, code: KeyCode, _modifiers: KeyM
             app.push_vim_digit(0);
             return;
         }
-        
+
         // '0' as motion when no count accumulated — go to top
         if c == '0' && app.vim_count == 0 {
             if let Some(range) = motions::get_motion_range(app, '0', 1) {
@@ -190,11 +212,10 @@ pub(crate) fn handle_pending_mode(app: &mut App, code: KeyCode, _modifiers: KeyM
         }
         _ => return,
     };
-    
+
     if let Some(range) = motions::get_motion_range(app, motion_char, count) {
         execute_operator(app, operator, range);
         app.reset_vim_count();
         app.mode = Mode::Normal;
     }
 }
-

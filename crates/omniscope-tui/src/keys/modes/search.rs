@@ -12,13 +12,37 @@ pub fn search_next(app: &mut App, reverse: bool) {
     };
 
     let query_lower = query.to_lowercase();
-    let len = app.books.len();
-    if len == 0 { return; }
-
     let forward = match (app.search_direction, reverse) {
         (SearchDirection::Forward, false) | (SearchDirection::Backward, true) => true,
         (SearchDirection::Forward, true) | (SearchDirection::Backward, false) => false,
     };
+
+    if app.active_panel == crate::app::ActivePanel::Sidebar && app.left_panel_mode == crate::app::LeftPanelMode::FolderTree {
+        let len = app.sidebar_items.len();
+        if len == 0 { return; }
+        let start = app.sidebar_selected;
+        
+        let iter: Vec<usize> = if forward {
+            (1..=len).map(|o| (start + o) % len).collect()
+        } else {
+            (1..=len).map(|o| (start + len - o) % len).collect()
+        };
+
+        for idx in iter {
+            if let crate::app::SidebarItem::FolderNode { name, .. } = &app.sidebar_items[idx] {
+                if name.to_lowercase().contains(&query_lower) {
+                    app.sidebar_selected = idx;
+                    app.status_message = format!("/{query} [{}/{}]", idx + 1, len);
+                    return;
+                }
+            }
+        }
+        app.status_message = format!("Pattern not found in folders: {query}");
+        return;
+    }
+
+    let len = app.books.len();
+    if len == 0 { return; }
 
     let start = app.selected_index;
     

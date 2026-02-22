@@ -105,14 +105,22 @@ fn render_key_hints(frame: &mut Frame, app: &App, area: Rect) {
     let mut spans = Vec::new();
     for hint in hints {
         spans.push(Span::styled(
-            format!(" {}:", hint.key),
+            " [",
+            Style::default().fg(app.theme.muted()),
+        ));
+        spans.push(Span::styled(
+            hint.key.to_string(),
             Style::default()
-                .fg(app.theme.yellow())
+                .fg(app.theme.cyan())
                 .add_modifier(Modifier::BOLD),
         ));
         spans.push(Span::styled(
-            format!("{}  ", hint.desc),
+            "] ",
             Style::default().fg(app.theme.muted()),
+        ));
+        spans.push(Span::styled(
+            format!("{}  ", hint.desc),
+            Style::default().fg(app.theme.text()),
         ));
     }
 

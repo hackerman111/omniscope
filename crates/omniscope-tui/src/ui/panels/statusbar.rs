@@ -28,6 +28,7 @@ fn render_left_zone(frame: &mut Frame, app: &App, area: Rect) {
         crate::app::SidebarFilter::All => "all books".to_string(),
         crate::app::SidebarFilter::Library(name) => name.to_lowercase(),
         crate::app::SidebarFilter::Tag(name) => name.to_lowercase(),
+        crate::app::SidebarFilter::VirtualFolder(name) => format!("virtual: {}", name),
         crate::app::SidebarFilter::Folder(path) => std::path::Path::new(path)
             .file_name()
             .map(|n| n.to_string_lossy().to_string())

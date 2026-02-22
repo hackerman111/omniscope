@@ -44,6 +44,9 @@ pub enum OmniscopeError {
 
     #[error("TOML serialize error: {0}")]
     TomlSerialize(#[from] toml::ser::Error),
+
+    #[error("Watcher error: {0}")]
+    Watcher(#[from] notify::Error),
 }
 
 /// Exit codes matching the CLI specification.

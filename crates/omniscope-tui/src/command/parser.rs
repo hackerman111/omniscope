@@ -36,6 +36,7 @@ const COMMANDS: &[&str] = &[
     "undolist",
     "earlier",
     "later",
+    "sync",
 ];
 
 pub fn get_command_suggestions(prefix: &str) -> Vec<&'static str> {
@@ -87,6 +88,7 @@ pub enum CommandAction {
     DeleteMarks(String),
     Doctor,
     Macros,
+    Sync,
     Unknown(String),
 }
 
@@ -128,6 +130,7 @@ pub fn parse_command(cmd: &str) -> CommandAction {
         ["delmarks", marks] => CommandAction::DeleteMarks(marks.to_string()),
         ["doctor"] => CommandAction::Doctor,
         ["macros"] => CommandAction::Macros,
+        ["sync"] => CommandAction::Sync,
         ["tabnew", ..] => {
             // Tabs not implemented yet, but parse gracefully
             CommandAction::Unknown("tabnew (tabs not implemented)".to_string())

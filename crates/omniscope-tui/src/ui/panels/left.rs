@@ -14,8 +14,13 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         app.theme.border()
     };
 
+    let title = match app.left_panel_mode {
+        crate::app::LeftPanelMode::LibraryView => " LIBRARIES & TAGS ",
+        crate::app::LeftPanelMode::FolderTree => " FOLDER TREE ",
+    };
+
     let block = Block::default()
-        .title(" LIBRARIES ") // Updated to match Step 3
+        .title(title)
         .borders(Borders::ALL)
         .border_style(Style::default().fg(border_color))
         .style(Style::default().bg(app.theme.bg()));
@@ -60,10 +65,31 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
                         .fg(app.theme.muted())
                         .add_modifier(Modifier::DIM),
                 ),
-                SidebarItem::Folder { path } => {
+                SidebarItem::VirtualFolder { id, name, count } => {
                     let prefix = if is_selected { "▶ " } else { "  " };
+                    let icon = match id.as_str() {
+                        "virtual_inbox" => "󰇄",
+                        "virtual_trash" => "󰩹",
+                        "virtual_missing" => "󰪮",
+                        _ => "󰉋",
+                    };
+                    let cnt_str = if *count > 0 { format!("  {count}") } else { String::new() };
                     (
-                        format!("{prefix}󰉋 {path}"),
+                        format!("{prefix}{icon} {name}{cnt_str}"),
+                        Style::default().fg(app.theme.muted()),
+                    )
+                }
+                SidebarItem::FolderNode { name, depth, is_expanded, has_children, ghost_count, .. } => {
+                    let prefix = if is_selected { "▶ " } else { "  " };
+                    let indent = " ".repeat(depth * 2);
+                    let icon = if *has_children {
+                        if *is_expanded { "▾ " } else { "▸ " }
+                    } else {
+                        "  "
+                    };
+                    let ghost = if *ghost_count > 0 { format!(" +{ghost_count}○") } else { String::new() };
+                    (
+                        format!("{prefix}{indent}{icon}󰉋 {name}{ghost}"),
                         Style::default().fg(app.theme.green()),
                     )
                 }

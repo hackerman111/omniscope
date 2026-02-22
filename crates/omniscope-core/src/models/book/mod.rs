@@ -10,6 +10,8 @@ pub use metadata::*;
 pub use organization::*;
 pub use web::*;
 
+use crate::models::folder::FilePresence;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -48,6 +50,15 @@ pub struct BookCard {
 
     #[serde(default)]
     pub notes: Vec<BookNote>,
+    
+    #[serde(default)]
+    pub file_presence: FilePresence,
+    
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub folder_id: Option<String>,
+    
+    #[serde(default)]
+    pub virtual_folder_ids: Vec<String>,
 }
 
 impl BookCard {
@@ -67,6 +78,9 @@ impl BookCard {
             ai: BookAi::default(),
             web: BookWeb::default(),
             notes: Vec::new(),
+            file_presence: FilePresence::default(),
+            folder_id: None,
+            virtual_folder_ids: Vec::new(),
         }
     }
 
@@ -87,6 +101,8 @@ pub struct BookSummaryView {
     pub tags: Vec<String>,
     pub has_file: bool,
     pub frecency_score: f64,
+    pub file_presence: FilePresence,
+    pub path: Option<String>,
 }
 
 impl From<&BookCard> for BookSummaryView {
@@ -102,6 +118,8 @@ impl From<&BookCard> for BookSummaryView {
             tags: card.organization.tags.clone(),
             has_file: card.file.is_some(),
             frecency_score: 0.0,
+            file_presence: card.file_presence.clone(),
+            path: card.file.as_ref().map(|f| f.path.clone()),
         }
     }
 }
@@ -139,5 +157,19 @@ mod tests {
         assert_eq!(restored.organization.tags.len(), 2);
         assert_eq!(restored.organization.rating, Some(5));
         assert_eq!(restored.organization.read_status, ReadStatus::Read);
+        assert_eq!(restored.file_presence, FilePresence::default());
+    }
+
+    #[test]
+    fn test_book_card_json_roundtrip_never_had_file() {
+        let mut card = BookCard::new("Ghost Book");
+        card.file_presence = FilePresence::NeverHadFile;
+
+        let json = serde_json::to_string_pretty(&card).unwrap();
+        let restored: BookCard = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(restored.id, card.id);
+        assert_eq!(restored.metadata.title, "Ghost Book");
+        assert_eq!(restored.file_presence, FilePresence::NeverHadFile);
     }
 }

@@ -209,7 +209,37 @@ pub(crate) fn handle_visual_mode(app: &mut App, code: KeyCode, modifiers: KeyMod
         }
         KeyCode::Char('d') | KeyCode::Char('x') => {
             let selections = app.visual_selections.clone();
-            app.delete_indices(&selections);
+            app.status_message = format!("Delete debug: {:?}", selections);
+            if app.active_panel == crate::app::ActivePanel::Sidebar && app.left_panel_mode == crate::app::LeftPanelMode::FolderTree {
+                let mut folder_ids = Vec::new();
+                for &idx in &selections {
+                    if let Some(crate::app::SidebarItem::FolderNode { id, .. }) = app.sidebar_items.get(idx) {
+                        folder_ids.push(id.clone());
+                    }
+                }
+                if !folder_ids.is_empty() {
+                    app.popup = Some(crate::popup::Popup::BulkDeleteFolders { folder_ids, keep_files: true });
+                }
+            } else if app.active_panel == crate::app::ActivePanel::BookList && app.center_panel_mode == crate::app::CenterPanelMode::FolderView {
+                 let mut folder_ids = Vec::new();
+                 let mut book_ids = Vec::new();
+                 for &idx in &selections {
+                     if let Some(item) = app.center_items.get(idx).cloned() {
+                         match item {
+                             crate::app::CenterItem::Folder(f) => folder_ids.push(f.id.clone()),
+                             crate::app::CenterItem::Book(b) => book_ids.push(b.id),
+                         }
+                     }
+                 }
+                 if !folder_ids.is_empty() {
+                      app.popup = Some(crate::popup::Popup::BulkDeleteFolders { folder_ids, keep_files: true });
+                 }
+                 if !book_ids.is_empty() {
+                      app.delete_books_by_id(&book_ids);
+                 }
+            } else if app.active_panel == crate::app::ActivePanel::BookList {
+                app.delete_indices(&selections);
+            }
             save_and_exit_visual(app);
         }
         KeyCode::Char('c') => {

@@ -523,5 +523,402 @@ pub(crate) fn render_popup(frame: &mut Frame, app: &App, popup: &Popup, area: Re
 
             frame.render_widget(List::new(items), inner);
         }
+
+        Popup::CreateFolder { input, .. } => {
+            let popup_area = centered_rect(40, 12, area);
+            frame.render_widget(Clear, popup_area);
+
+            let block = Block::default()
+                .title(" Create Folder ")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(app.theme.green()))
+                .style(Style::default().bg(app.theme.bg()));
+
+            let inner = block.inner(popup_area);
+            frame.render_widget(block, popup_area);
+
+            let lines = vec![
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("  Name: ", Style::default().fg(app.theme.muted())),
+                    Span::styled(
+                        format!("{input}█"),
+                        Style::default().fg(app.theme.fg_bright()),
+                    ),
+                ]),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "  Enter: create  Esc: cancel",
+                    Style::default()
+                        .fg(app.theme.muted())
+                        .add_modifier(Modifier::DIM),
+                )),
+            ];
+            frame.render_widget(Paragraph::new(lines), inner);
+        }
+
+        Popup::RenameFolder { old_name, input, .. } => {
+            let popup_area = centered_rect(50, 12, area);
+            frame.render_widget(Clear, popup_area);
+
+            let block = Block::default()
+                .title(format!(" Rename \"{old_name}\" "))
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(app.theme.yellow()))
+                .style(Style::default().bg(app.theme.bg()));
+
+            let inner = block.inner(popup_area);
+            frame.render_widget(block, popup_area);
+
+            let lines = vec![
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("  New Name: ", Style::default().fg(app.theme.muted())),
+                    Span::styled(
+                        format!("{input}█"),
+                        Style::default().fg(app.theme.fg_bright()),
+                    ),
+                ]),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "  Enter: rename  Esc: cancel",
+                    Style::default()
+                        .fg(app.theme.muted())
+                        .add_modifier(Modifier::DIM),
+                )),
+            ];
+            frame.render_widget(Paragraph::new(lines), inner);
+        }
+
+        Popup::ConfirmDeleteFolder { folder_name, keep_files, .. } => {
+            let popup_area = centered_rect(50, 20, area);
+            frame.render_widget(Clear, popup_area);
+
+            let border_color = if *keep_files { app.theme.yellow() } else { app.theme.red() };
+
+            let block = Block::default()
+                .title(" Confirm Delete Folder ")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(border_color))
+                .style(Style::default().bg(app.theme.bg()));
+
+            let inner = block.inner(popup_area);
+            frame.render_widget(block, popup_area);
+
+            let warning_text = if *keep_files {
+                "Folder will be removed from DB, files kept on disk."
+            } else {
+                "Folder AND ALL FILES inside will be permanently deleted!"
+            };
+
+            let lines = vec![
+                Line::from(""),
+                Line::from(Span::styled(
+                    format!("  Delete \"{folder_name}\"?"),
+                    Style::default().fg(app.theme.fg()),
+                )),
+                Line::from(""),
+                Line::from(Span::styled(
+                    format!("  {warning_text}"),
+                    Style::default()
+                        .fg(border_color)
+                        .add_modifier(Modifier::BOLD),
+                )),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("  [", Style::default().fg(app.theme.muted())),
+                    Span::styled("Tab", Style::default().fg(app.theme.frost_blue())),
+                    Span::styled("] toggle keep files: ", Style::default().fg(app.theme.muted())),
+                    Span::styled(
+                        if *keep_files { "KEEP" } else { "DELETE" },
+                        Style::default().fg(border_color).add_modifier(Modifier::BOLD)
+                    ),
+                ]),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled(
+                        "  [y]",
+                        Style::default()
+                            .fg(app.theme.red())
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled("es  ", Style::default().fg(app.theme.muted())),
+                    Span::styled(
+                        "[n]",
+                        Style::default()
+                            .fg(app.theme.green())
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled("o  ", Style::default().fg(app.theme.muted())),
+                    Span::styled(
+                        "Esc",
+                        Style::default()
+                            .fg(app.theme.muted())
+                            .add_modifier(Modifier::DIM),
+                    ),
+                    Span::styled(
+                        ": cancel",
+                        Style::default()
+                            .fg(app.theme.muted())
+                            .add_modifier(Modifier::DIM),
+                    ),
+                ]),
+            ];
+
+            frame.render_widget(Paragraph::new(lines), inner);
+        }
+
+        Popup::BulkDeleteFolders { folder_ids, keep_files } => {
+            let popup_area = centered_rect(50, 20, area);
+            frame.render_widget(Clear, popup_area);
+
+            let border_color = if *keep_files { app.theme.yellow() } else { app.theme.red() };
+
+            let block = Block::default()
+                .title(" Confirm Bulk Delete Folders ")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(border_color))
+                .style(Style::default().bg(app.theme.bg()));
+
+            let inner = block.inner(popup_area);
+            frame.render_widget(block, popup_area);
+
+            let warning_text = if *keep_files {
+                "Folders will be removed from DB, files kept on disk."
+            } else {
+                "Folders AND ALL FILES inside will be permanently deleted!"
+            };
+
+            let lines = vec![
+                Line::from(""),
+                Line::from(Span::styled(
+                    format!("  Delete {} folders?", folder_ids.len()),
+                    Style::default().fg(app.theme.fg()),
+                )),
+                Line::from(""),
+                Line::from(Span::styled(
+                    format!("  {warning_text}"),
+                    Style::default()
+                        .fg(border_color)
+                        .add_modifier(Modifier::BOLD),
+                )),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("  [", Style::default().fg(app.theme.muted())),
+                    Span::styled("Tab", Style::default().fg(app.theme.frost_blue())),
+                    Span::styled("] toggle keep files: ", Style::default().fg(app.theme.muted())),
+                    Span::styled(
+                        if *keep_files { "KEEP" } else { "DELETE" },
+                        Style::default().fg(border_color).add_modifier(Modifier::BOLD)
+                    ),
+                ]),
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled(
+                        "  [y]",
+                        Style::default()
+                            .fg(app.theme.red())
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled("es  ", Style::default().fg(app.theme.muted())),
+                    Span::styled(
+                        "[n]",
+                        Style::default()
+                            .fg(app.theme.green())
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled("o  ", Style::default().fg(app.theme.muted())),
+                    Span::styled(
+                        "Esc",
+                        Style::default()
+                            .fg(app.theme.muted())
+                            .add_modifier(Modifier::DIM),
+                    ),
+                    Span::styled(
+                        ": cancel",
+                        Style::default()
+                            .fg(app.theme.muted())
+                            .add_modifier(Modifier::DIM),
+                    ),
+                ]),
+            ];
+
+            frame.render_widget(Paragraph::new(lines), inner);
+        }
+
+        Popup::AttachGhostFile { input, autocomplete, .. } => {
+            let popup_area = centered_rect(70, 15, area);
+            frame.render_widget(Clear, popup_area);
+
+            let block = Block::default()
+                .title(" Attach File ")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(app.theme.frost_blue()))
+                .style(Style::default().bg(app.theme.bg()));
+
+            let inner = block.inner(popup_area);
+            frame.render_widget(block, popup_area);
+
+            let lines = vec![
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("  File path: ", Style::default().fg(app.theme.muted())),
+                    Span::styled(
+                        format!("{input}█"),
+                        Style::default().fg(app.theme.fg_bright()),
+                    ),
+                ]),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "  [Tab] cycle suggestions  [Enter] submit  [Esc] cancel",
+                    Style::default()
+                        .fg(app.theme.muted())
+                        .add_modifier(Modifier::DIM),
+                )),
+            ];
+            frame.render_widget(Paragraph::new(lines), inner);
+            
+            // Render autocomplete if active
+            if autocomplete.active && !autocomplete.visible.is_empty() {
+                let x = inner.x + 13;
+                let y = inner.y + 2;
+                let width = (inner.width as u16).saturating_sub(15).max(20);
+                let height = autocomplete.visible.len().min(5) as u16 + 2;
+
+                let sug_area = Rect { x, y, width, height };
+                frame.render_widget(Clear, sug_area);
+
+                let items: Vec<ListItem> = autocomplete
+                    .visible
+                    .iter()
+                    .enumerate()
+                    .map(|(i, s)| {
+                        let is_sel = autocomplete.selected == Some(i);
+                        let style = if is_sel {
+                            Style::default()
+                                .bg(app.theme.green())
+                                .fg(app.theme.bg())
+                                .add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(app.theme.fg())
+                        };
+                        ListItem::new(Span::styled(format!(" {s} "), style))
+                    })
+                    .collect();
+
+                let block = Block::default()
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(app.theme.green()));
+                frame.render_widget(List::new(items).block(block), sug_area);
+            }
+        }
+        Popup::FindGhostFilePlaceholder { .. } => {
+            let popup_area = centered_rect(50, 10, area);
+            frame.render_widget(Clear, popup_area);
+
+            let block = Block::default()
+                .title(" Find & Download ")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(app.theme.frost_ice()))
+                .style(Style::default().bg(app.theme.bg()));
+
+            let inner = block.inner(popup_area);
+            frame.render_widget(block, popup_area);
+
+            let lines = vec![
+                Line::from(""),
+                Line::from(Span::styled("  Placeholder: Find & Download functionality is WIP.", Style::default().fg(app.theme.fg()))),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "  Press any key to close.",
+                    Style::default().fg(app.theme.muted()).add_modifier(Modifier::DIM),
+                )),
+            ];
+            frame.render_widget(Paragraph::new(lines), inner);
+        }
+
+        Popup::CreateVirtualFolder { input, .. } => {
+            let popup_area = centered_rect(40, 12, area);
+            frame.render_widget(Clear, popup_area);
+
+            let block = Block::default()
+                .title(" Create Virtual Folder ")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(app.theme.frost_blue()))
+                .style(Style::default().bg(app.theme.bg()));
+
+            let inner = block.inner(popup_area);
+            frame.render_widget(block, popup_area);
+
+            let lines = vec![
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("  Name: ", Style::default().fg(app.theme.muted())),
+                    Span::styled(
+                        format!("{input}█"),
+                        Style::default().fg(app.theme.fg_bright()),
+                    ),
+                ]),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "  Enter: create  Esc: cancel",
+                    Style::default()
+                        .fg(app.theme.muted())
+                        .add_modifier(Modifier::DIM),
+                )),
+            ];
+            frame.render_widget(Paragraph::new(lines), inner);
+        }
+
+        Popup::AddToVirtualFolder { selected_folder_idx, folders, .. } => {
+            let popup_area = centered_rect(50, 25, area);
+            frame.render_widget(Clear, popup_area);
+
+            let block = Block::default()
+                .title(" Add to Virtual Folder ")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(app.theme.frost_mint()))
+                .style(Style::default().bg(app.theme.bg()));
+
+            let inner = block.inner(popup_area);
+            frame.render_widget(block, popup_area);
+
+            if folders.is_empty() {
+                let lines = vec![
+                    Line::from(""),
+                    Line::from(Span::styled(
+                        "  No Virtual Folders exist.",
+                        Style::default().fg(app.theme.fg()),
+                    )),
+                    Line::from(""),
+                    Line::from(Span::styled(
+                        "  Esc: close",
+                        Style::default()
+                            .fg(app.theme.muted())
+                            .add_modifier(Modifier::DIM),
+                    )),
+                ];
+                frame.render_widget(Paragraph::new(lines), inner);
+            } else {
+                let items: Vec<ListItem> = folders
+                    .iter()
+                    .enumerate()
+                    .map(|(i, f)| {
+                        let is_sel = i == *selected_folder_idx;
+                        let style = if is_sel {
+                            Style::default()
+                                .bg(app.theme.frost_mint())
+                                .fg(app.theme.bg())
+                                .add_modifier(Modifier::BOLD)
+                        } else {
+                            Style::default().fg(app.theme.fg())
+                        };
+                        ListItem::new(Span::styled(format!("  {}  ", f.name), style))
+                    })
+                    .collect();
+
+                frame.render_widget(List::new(items), inner);
+            }
+        }
     }
 }

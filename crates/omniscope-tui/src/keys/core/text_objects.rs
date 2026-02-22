@@ -1,4 +1,4 @@
-use crate::app::App;
+use crate::app::{App, CenterItem, CenterPanelMode};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TextObjectKind {
@@ -9,6 +9,8 @@ pub enum TextObjectKind {
 pub fn get_text_object_range(app: &App, object: char, kind: TextObjectKind) -> Option<Vec<usize>> {
     let current = app.selected_index;
     let current_book = app.selected_book()?;
+
+    let in_folder_view = app.center_panel_mode == CenterPanelMode::FolderView;
 
     match object {
         // b: book (current book only)
@@ -26,21 +28,41 @@ pub fn get_text_object_range(app: &App, object: char, kind: TextObjectKind) -> O
                 let target_lib = &card.organization.libraries[0];
 
                 // Find all books in the same library
-                let indices: Vec<usize> = app
-                    .books
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, b)| {
-                        if let Ok(c) =
-                            omniscope_core::storage::json_cards::load_card_by_id(&cards_dir, &b.id)
-                        {
-                            c.organization.libraries.contains(target_lib)
-                        } else {
-                            false
-                        }
-                    })
-                    .map(|(i, _)| i)
-                    .collect();
+                let indices: Vec<usize> = if in_folder_view {
+                    app.center_items
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, item)| {
+                            if let CenterItem::Book(b) = item {
+                                if let Ok(c) = omniscope_core::storage::json_cards::load_card_by_id(
+                                    &cards_dir, &b.id,
+                                ) {
+                                    c.organization.libraries.contains(target_lib)
+                                } else {
+                                    false
+                                }
+                            } else {
+                                false
+                            }
+                        })
+                        .map(|(i, _)| i)
+                        .collect()
+                } else {
+                    app.books
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, b)| {
+                            if let Ok(c) = omniscope_core::storage::json_cards::load_card_by_id(
+                                &cards_dir, &b.id,
+                            ) {
+                                c.organization.libraries.contains(target_lib)
+                            } else {
+                                false
+                            }
+                        })
+                        .map(|(i, _)| i)
+                        .collect()
+                };
 
                 if indices.is_empty() {
                     None
@@ -59,13 +81,27 @@ pub fn get_text_object_range(app: &App, object: char, kind: TextObjectKind) -> O
             }
             let primary = &authors[0];
 
-            let indices: Vec<usize> = app
-                .books
-                .iter()
-                .enumerate()
-                .filter(|(_, b)| b.authors.contains(primary))
-                .map(|(i, _)| i)
-                .collect();
+            let indices: Vec<usize> = if in_folder_view {
+                app.center_items
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, item)| {
+                        if let CenterItem::Book(b) = item {
+                            b.authors.contains(primary)
+                        } else {
+                            false
+                        }
+                    })
+                    .map(|(i, _)| i)
+                    .collect()
+            } else {
+                app.books
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, b)| b.authors.contains(primary))
+                    .map(|(i, _)| i)
+                    .collect()
+            };
             if indices.is_empty() {
                 None
             } else {
@@ -79,24 +115,37 @@ pub fn get_text_object_range(app: &App, object: char, kind: TextObjectKind) -> O
                 return None;
             }
 
-            let indices: Vec<usize> = app
-                .books
-                .iter()
-                .enumerate()
-                .filter(|(_, b)| {
-                    match kind {
-                        TextObjectKind::Inner => {
-                            // Inner: books that share ALL tags with current
-                            current_tags.iter().all(|t| b.tags.contains(t))
+            let indices: Vec<usize> = if in_folder_view {
+                app.center_items
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, item)| {
+                        if let CenterItem::Book(b) = item {
+                            match kind {
+                                TextObjectKind::Inner => {
+                                    current_tags.iter().all(|t| b.tags.contains(t))
+                                }
+                                TextObjectKind::Around => {
+                                    current_tags.iter().any(|t| b.tags.contains(t))
+                                }
+                            }
+                        } else {
+                            false
                         }
-                        TextObjectKind::Around => {
-                            // Around: books that share ANY tag with current
-                            current_tags.iter().any(|t| b.tags.contains(t))
-                        }
-                    }
-                })
-                .map(|(i, _)| i)
-                .collect();
+                    })
+                    .map(|(i, _)| i)
+                    .collect()
+            } else {
+                app.books
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, b)| match kind {
+                        TextObjectKind::Inner => current_tags.iter().all(|t| b.tags.contains(t)),
+                        TextObjectKind::Around => current_tags.iter().any(|t| b.tags.contains(t)),
+                    })
+                    .map(|(i, _)| i)
+                    .collect()
+            };
             if indices.is_empty() {
                 None
             } else {
@@ -105,10 +154,14 @@ pub fn get_text_object_range(app: &App, object: char, kind: TextObjectKind) -> O
         }
         // f: folder — all books in current filter/view
         'f' => {
+            let max_idx = if in_folder_view {
+                app.center_items.len()
+            } else {
+                app.books.len()
+            };
             match kind {
                 TextObjectKind::Inner => {
-                    // Inner folder = all currently displayed books
-                    let indices: Vec<usize> = (0..app.books.len()).collect();
+                    let indices: Vec<usize> = (0..max_idx).collect();
                     if indices.is_empty() {
                         None
                     } else {
@@ -116,8 +169,7 @@ pub fn get_text_object_range(app: &App, object: char, kind: TextObjectKind) -> O
                     }
                 }
                 TextObjectKind::Around => {
-                    // Around = same as inner (no parent container to include)
-                    let indices: Vec<usize> = (0..app.books.len()).collect();
+                    let indices: Vec<usize> = (0..max_idx).collect();
                     if indices.is_empty() {
                         None
                     } else {
@@ -129,13 +181,27 @@ pub fn get_text_object_range(app: &App, object: char, kind: TextObjectKind) -> O
         // y: year — all books of the same year
         'y' => {
             let year = current_book.year;
-            let indices: Vec<usize> = app
-                .books
-                .iter()
-                .enumerate()
-                .filter(|(_, b)| b.year == year)
-                .map(|(i, _)| i)
-                .collect();
+            let indices: Vec<usize> = if in_folder_view {
+                app.center_items
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, item)| {
+                        if let CenterItem::Book(b) = item {
+                            b.year == year
+                        } else {
+                            false
+                        }
+                    })
+                    .map(|(i, _)| i)
+                    .collect()
+            } else {
+                app.books
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, b)| b.year == year)
+                    .map(|(i, _)| i)
+                    .collect()
+            };
             if indices.is_empty() {
                 None
             } else {

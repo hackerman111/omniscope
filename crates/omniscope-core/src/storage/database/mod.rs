@@ -100,6 +100,13 @@ impl Database {
         Ok(())
     }
 
+    pub fn get_book_card(&self, id: &str) -> Result<BookCard> {
+        let uuid = Uuid::parse_str(id).map_err(|_| OmniscopeError::BookNotFound(id.to_string()))?;
+        let conn = self.pool.get_connection();
+        let repo = super::repositories::SqliteBookRepository::new(conn);
+        repo.find_by_id(&uuid)?.ok_or_else(|| OmniscopeError::BookNotFound(id.to_string()))
+    }
+
     pub fn count_books(&self) -> Result<usize> {
         let conn = self.pool.get_connection();
         let repo = super::repositories::SqliteBookRepository::new(conn);
@@ -135,6 +142,12 @@ impl Database {
         let conn = self.pool.get_connection();
         let repo = super::repositories::SqliteBookRepository::new(conn);
         repo.list_by_library(library, limit)
+    }
+
+    pub fn list_books_by_folder_id(&self, folder_id: Option<&str>, limit: usize) -> Result<Vec<BookSummaryView>> {
+        let conn = self.pool.get_connection();
+        let repo = super::repositories::SqliteBookRepository::new(conn);
+        repo.list_by_folder_id(folder_id, limit)
     }
 
     pub fn sync_from_cards(&self, cards_dir: &std::path::Path) -> Result<usize> {
@@ -195,10 +208,27 @@ impl Database {
         Ok(id)
     }
 
+    pub fn create_virtual_folder(&self, name: &str) -> Result<String> {
+        let mut folder = Folder::new(name);
+        folder.folder_type = crate::models::FolderType::Virtual;
+        let id = folder.id.clone();
+        
+        let conn = self.pool.get_connection();
+        let repo = super::repositories::SqliteFolderRepository::new(conn);
+        repo.save(&folder)?;
+        Ok(id)
+    }
+
     pub fn list_folders(&self, parent_id: Option<&str>) -> Result<Vec<Folder>> {
         let conn = self.pool.get_connection();
         let repo = super::repositories::SqliteFolderRepository::new(conn);
         repo.list_children(parent_id)
+    }
+
+    pub fn list_all_folders(&self) -> Result<Vec<Folder>> {
+        let conn = self.pool.get_connection();
+        let repo = super::repositories::SqliteFolderRepository::new(conn);
+        repo.list_all()
     }
 
     pub fn delete_folder(&self, id: &str) -> Result<()> {
@@ -206,6 +236,18 @@ impl Database {
         let repo = super::repositories::SqliteFolderRepository::new(conn);
         repo.delete(&id.to_string())?;
         Ok(())
+    }
+
+    pub fn find_folder_by_id(&self, id: &str) -> Result<Option<Folder>> {
+        let conn = self.pool.get_connection();
+        let repo = super::repositories::SqliteFolderRepository::new(conn);
+        repo.find_by_id(&id.to_string())
+    }
+
+    pub fn update_folder(&self, folder: &Folder) -> Result<()> {
+        let conn = self.pool.get_connection();
+        let repo = super::repositories::SqliteFolderRepository::new(conn);
+        repo.save(folder)
     }
 
     pub fn rename_folder(&self, id: &str, new_name: &str) -> Result<()> {
@@ -249,6 +291,51 @@ impl Database {
         let conn = self.pool.get_connection();
         let repo = super::repositories::SqliteBookRepository::new(conn);
         repo.list_all_file_paths()
+    }
+
+    pub fn update_folder_path_recursive(&self, id: &str, old_path: &str, new_path: &str) -> Result<()> {
+        let conn = self.pool.get_connection();
+        let repo = super::repositories::SqliteFolderRepository::new(conn);
+        repo.update_path_recursive(old_path, new_path)?;
+        Ok(())
+    }
+
+    pub fn list_virtual_folders(&self) -> Result<Vec<Folder>> {
+        let conn = self.pool.get_connection();
+        let repo = super::repositories::SqliteFolderRepository::new(conn);
+        repo.list_virtual_folders()
+    }
+
+    pub fn add_book_to_virtual_folder(&self, book_id: &str, folder_id: &str) -> Result<()> {
+        let uuid = Uuid::parse_str(book_id).map_err(|_| OmniscopeError::BookNotFound(book_id.to_string()))?;
+        let conn = self.pool.get_connection();
+        let repo = super::repositories::SqliteBookRepository::new(conn);
+        repo.add_to_virtual_folder(&uuid, folder_id)
+    }
+
+    pub fn remove_book_from_virtual_folder(&self, book_id: &str, folder_id: &str) -> Result<()> {
+        let uuid = Uuid::parse_str(book_id).map_err(|_| OmniscopeError::BookNotFound(book_id.to_string()))?;
+        let conn = self.pool.get_connection();
+        let repo = super::repositories::SqliteBookRepository::new(conn);
+        repo.remove_from_virtual_folder(&uuid, folder_id)
+    }
+
+    pub fn list_books_by_virtual_folder(&self, folder_id: &str, limit: usize) -> Result<Vec<BookSummaryView>> {
+        let conn = self.pool.get_connection();
+        let repo = super::repositories::SqliteBookRepository::new(conn);
+        repo.list_by_virtual_folder(folder_id, limit)
+    }
+
+    pub fn count_books_in_virtual_folder(&self, folder_id: &str) -> Result<usize> {
+        let conn = self.pool.get_connection();
+        let repo = super::repositories::SqliteBookRepository::new(conn);
+        repo.count_by_virtual_folder(folder_id)
+    }
+
+    pub fn find_books_by_path_prefix(&self, prefix: &str) -> Result<Vec<BookCard>> {
+        let conn = self.pool.get_connection();
+        let repo = super::repositories::SqliteBookRepository::new(conn);
+        repo.find_books_by_path_prefix(prefix)
     }
 }
 

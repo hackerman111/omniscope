@@ -252,6 +252,7 @@ pub fn execute_command(app: &mut App, cmd: &str) {
                 "Doctor: books={book_count}/{all_count} undo={undo_count} marks={marks_count} regs={reg_count} macros={macro_count}"
             );
         }
+        CommandAction::Sync => app.generate_sync_report(),
         CommandAction::Unknown(unknown_cmd) => {
             app.status_message = format!("Unknown command: {unknown_cmd}");
         }

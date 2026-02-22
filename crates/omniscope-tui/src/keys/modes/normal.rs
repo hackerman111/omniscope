@@ -103,6 +103,22 @@ pub(crate) fn handle_normal_mode(app: &mut App, code: KeyCode, modifiers: KeyMod
             app.search_direction = SearchDirection::Backward;
         }
 
+        // ─── Virtual Folders ────────────────────────────────────────
+        KeyCode::Char('+') => {
+            app.reset_vim_count();
+            if app.selected_book().is_some() {
+                if let Some(ref db) = app.db {
+                    if let Ok(folders) = db.list_virtual_folders() {
+                        app.popup = Some(Popup::AddToVirtualFolder {
+                            book_idx: app.selected_index,
+                            selected_folder_idx: 0,
+                            folders,
+                        });
+                    }
+                }
+            }
+        }
+
         // ─── Search Next/Prev ───────────────────────────────────────
         KeyCode::Char('n') => {
             search::search_next(app, false);
@@ -158,8 +174,28 @@ pub(crate) fn handle_normal_mode(app: &mut App, code: KeyCode, modifiers: KeyMod
                  }
             }
         }
-        KeyCode::Char('h') | KeyCode::Left  => { app.reset_vim_count(); app.focus_left(); }
-        KeyCode::Char('l') | KeyCode::Right => { app.reset_vim_count(); app.focus_right(); }
+        KeyCode::Char('h') | KeyCode::Left  => { 
+            app.reset_vim_count(); 
+            if app.active_panel == crate::app::ActivePanel::Sidebar {
+                if let Some(crate::app::SidebarItem::FolderNode { is_expanded: true, .. }) = app.sidebar_items.get(app.sidebar_selected) {
+                    app.toggle_folder_expansion();
+                }
+            } else {
+                app.focus_left(); 
+            }
+        }
+        KeyCode::Char('l') | KeyCode::Right => { 
+            app.reset_vim_count(); 
+            if app.active_panel == crate::app::ActivePanel::Sidebar {
+                if let Some(crate::app::SidebarItem::FolderNode { is_expanded: false, .. }) = app.sidebar_items.get(app.sidebar_selected) {
+                    app.toggle_folder_expansion();
+                } else {
+                    app.focus_right(); 
+                }
+            } else {
+                app.focus_right(); 
+            }
+        }
 
         // ─── Complex Motions (G, gg, 0, $) ──────────────────────────
         KeyCode::Char('G') => {
@@ -246,7 +282,14 @@ pub(crate) fn handle_normal_mode(app: &mut App, code: KeyCode, modifiers: KeyMod
         KeyCode::Char('\'') => { app.pending_key = Some('\''); }
         KeyCode::Char('[') => { app.pending_key = Some('['); }
         KeyCode::Char(']') => { app.pending_key = Some(']'); }
-        KeyCode::Char(' ') => { app.pending_key = Some(' '); }
+        KeyCode::Char(' ') => { 
+            app.reset_vim_count();
+            if app.active_panel == crate::app::ActivePanel::Sidebar {
+                app.toggle_folder_expansion();
+            } else {
+                app.pending_key = Some(' ');
+            }
+        }
 
         // ─── Scroll (Ctrl variants MUST precede plain char matches) ──
         KeyCode::Char('d') if modifiers.contains(KeyModifiers::CONTROL) => {
@@ -286,8 +329,19 @@ pub(crate) fn handle_normal_mode(app: &mut App, code: KeyCode, modifiers: KeyMod
 
         // ─── Operators ──────────────────────────────────────────────
         KeyCode::Char('d') if !modifiers.contains(KeyModifiers::CONTROL) => {
-             app.pending_operator = Some(Operator::Delete);
-             app.mode = Mode::Pending;
+             app.reset_vim_count();
+             if app.active_panel == crate::app::ActivePanel::Sidebar {
+                 if let Some(crate::app::SidebarItem::FolderNode { id, name, .. }) = app.sidebar_items.get(app.sidebar_selected) {
+                     app.popup = Some(Popup::ConfirmDeleteFolder {
+                         folder_id: id.to_string(),
+                         folder_name: name.to_string(),
+                         keep_files: true,
+                     });
+                 }
+             } else {
+                 app.pending_operator = Some(Operator::Delete);
+                 app.mode = Mode::Pending;
+             }
         }
         KeyCode::Char('y') if !modifiers.contains(KeyModifiers::CONTROL) => {
              app.pending_operator = Some(Operator::Yank);
@@ -355,7 +409,35 @@ pub(crate) fn handle_normal_mode(app: &mut App, code: KeyCode, modifiers: KeyMod
 
         // ─── Book Operations ────────────────────────────────────────
         KeyCode::Char('a') if !modifiers.contains(KeyModifiers::CONTROL) => {
-            app.reset_vim_count(); app.open_add_popup();
+            app.reset_vim_count();
+            if app.active_panel == crate::app::ActivePanel::Sidebar {
+                if let Some(crate::app::SidebarItem::FolderNode { id, .. }) = app.sidebar_items.get(app.sidebar_selected) {
+                    app.popup = Some(Popup::CreateFolder { parent_id: Some(id.to_string()), input: String::new(), cursor: 0 });
+                } else {
+                    app.popup = Some(Popup::CreateFolder { parent_id: None, input: String::new(), cursor: 0 });
+                }
+            } else {
+                app.open_add_popup();
+            }
+        }
+        KeyCode::Char('A') if !modifiers.contains(KeyModifiers::CONTROL) => {
+            app.reset_vim_count();
+            if app.active_panel == crate::app::ActivePanel::Sidebar {
+                app.popup = Some(Popup::CreateFolder { parent_id: None, input: String::new(), cursor: 0 });
+            }
+        }
+        KeyCode::Char('r') if !modifiers.contains(KeyModifiers::CONTROL) => {
+            app.reset_vim_count();
+            if app.active_panel == crate::app::ActivePanel::Sidebar {
+                if let Some(crate::app::SidebarItem::FolderNode { id, name, .. }) = app.sidebar_items.get(app.sidebar_selected) {
+                    app.popup = Some(Popup::RenameFolder {
+                        folder_id: id.to_string(),
+                        old_name: name.to_string(),
+                        input: name.to_string(),
+                        cursor: name.chars().count(),
+                    });
+                }
+            }
         }
         KeyCode::Char('o') if !modifiers.contains(KeyModifiers::CONTROL) => {
             app.reset_vim_count(); app.open_selected_book();
@@ -366,6 +448,17 @@ pub(crate) fn handle_normal_mode(app: &mut App, code: KeyCode, modifiers: KeyMod
                 id: app.selected_book().map(|b| b.id.to_string()).unwrap_or_default(),
                 current: app.selected_book().and_then(|b| b.rating),
             });
+        }
+        KeyCode::Char('E') => {
+            app.reset_vim_count();
+            if let Some(book) = app.selected_book() {
+                app.popup = Some(Popup::AttachGhostFile {
+                    book_id: book.id.to_string(),
+                    input: String::new(),
+                    cursor: 0,
+                    autocomplete: crate::popup::AutocompleteState::new(),
+                });
+            }
         }
         KeyCode::Char('s') => { app.reset_vim_count(); app.cycle_status(); }
         KeyCode::Char('S') => { 
@@ -387,11 +480,19 @@ pub(crate) fn handle_normal_mode(app: &mut App, code: KeyCode, modifiers: KeyMod
         }
 
         // ─── Misc ───────────────────────────────────────────────────
+        KeyCode::Char('T') => {
+            app.reset_vim_count();
+            if app.active_panel == crate::app::ActivePanel::BookList && app.center_panel_mode == crate::app::CenterPanelMode::FolderView {
+                app.folder_view_sort = app.folder_view_sort.next();
+                app.refresh_center_panel();
+                app.status_message = format!("Sort: {:?}", app.folder_view_sort);
+            }
+        }
         KeyCode::Enter => {
             app.reset_vim_count();
             match app.active_panel {
                 crate::app::ActivePanel::Sidebar => app.select_sidebar_item(),
-                crate::app::ActivePanel::BookList => app.open_selected_book(),
+                crate::app::ActivePanel::BookList => app.open_selected_center_item(),
                 _ => {}
             }
         }

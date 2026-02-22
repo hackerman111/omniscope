@@ -7,29 +7,80 @@ impl App {
     pub fn refresh_sidebar(&mut self) {
         let mut items = Vec::new();
 
-        let total = self.all_books.len() as u32;
-        items.push(SidebarItem::AllBooks { count: total });
+        match self.left_panel_mode {
+            crate::app::LeftPanelMode::LibraryView => {
+                let total = self.all_books.len() as u32;
+                items.push(SidebarItem::AllBooks { count: total });
 
-        // Libraries
-        if let Some(ref db) = self.db {
-            if let Ok(libs) = db.list_libraries() {
-                for (name, count) in libs {
-                    items.push(SidebarItem::Library { name, count });
+                // Libraries
+                if let Some(ref db) = self.db {
+                    if let Ok(libs) = db.list_libraries() {
+                        for (name, count) in libs {
+                            items.push(SidebarItem::Library { name, count });
+                        }
+                    }
+                }
+
+                // Tags
+                items.push(SidebarItem::TagHeader);
+                if let Some(ref db) = self.db {
+                    if let Ok(tags) = db.list_tags() {
+                        for (name, count) in tags {
+                            items.push(SidebarItem::Tag { name, count });
+                        }
+                    }
+                }
+            }
+            crate::app::LeftPanelMode::FolderTree => {
+                // Virtual Folders
+                if let Some(ref db) = self.db {
+                    if let Ok(v_folders) = db.list_virtual_folders() {
+                        for folder in v_folders {
+                            let count = db.count_books_in_virtual_folder(&folder.id).unwrap_or(0);
+                            items.push(SidebarItem::VirtualFolder {
+                                id: folder.id,
+                                name: folder.name,
+                                count: count as u32,
+                            });
+                        }
+                    }
+                }
+
+                items.push(SidebarItem::FolderHeader);
+
+                // Folders
+                if let Some(ref tree) = self.folder_tree {
+                    let mut stack: Vec<(&String, usize)> =
+                        tree.root_ids.iter().rev().map(|id| (id, 0)).collect();
+
+                    while let Some((id, depth)) = stack.pop() {
+                        if let Some(node) = tree.nodes.get(id) {
+                            let has_children = !node.children.is_empty();
+                            let is_expanded = self.expanded_folders.contains(id);
+                            let disk_path = node.folder.disk_path.clone().unwrap_or_default();
+
+                            items.push(SidebarItem::FolderNode {
+                                id: id.clone(),
+                                name: node.folder.name.clone(),
+                                depth,
+                                is_expanded,
+                                has_children,
+                                ghost_count: 0, // TODO: calculate dynamically
+                                disk_path,
+                            });
+
+                            if is_expanded && has_children {
+                                // Push children in reverse order so they pop in alphabetical order (as sorted in tree)
+                                for child_id in node.children.iter().rev() {
+                                    stack.push((child_id, depth + 1));
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
 
-        // Tags
-        items.push(SidebarItem::TagHeader);
-        if let Some(ref db) = self.db {
-            if let Ok(tags) = db.list_tags() {
-                for (name, count) in tags {
-                    items.push(SidebarItem::Tag { name, count });
-                }
-            }
-        }
-
-        items.push(SidebarItem::FolderHeader);
         self.sidebar_items = items;
     }
 
@@ -71,6 +122,13 @@ impl App {
                     db.list_books_by_tag(tag, 500).unwrap_or_default()
                 } else {
                     self.all_books.clone()
+                }
+            }
+            SidebarFilter::VirtualFolder(folder_id) => {
+                if let Some(ref db) = self.db {
+                    db.list_books_by_virtual_folder(folder_id, 1000).unwrap_or_default()
+                } else {
+                    Vec::new()
                 }
             }
             SidebarFilter::Folder(folder_path) => self
@@ -122,13 +180,90 @@ impl App {
                 SidebarItem::Tag { name, .. } => {
                     self.sidebar_filter = SidebarFilter::Tag(name.clone());
                 }
-                SidebarItem::Folder { path } => {
-                    self.sidebar_filter = SidebarFilter::Folder(path.clone());
+                SidebarItem::FolderNode { disk_path, .. } => {
+                    self.sidebar_filter = SidebarFilter::Folder(disk_path.clone());
+                }
+                // Placeholder for virtual folders, acting as AllBooks for now until F-4 filtering implemented
+                SidebarItem::VirtualFolder { id, .. } => {
+                    self.sidebar_filter = SidebarFilter::VirtualFolder(id.clone());
                 }
                 _ => return,
             }
-            self.apply_filter();
+            self.refresh_books();
             self.active_panel = ActivePanel::BookList;
+        }
+    }
+
+    /// Refresh the center panel items when in FolderView mode
+    pub fn refresh_center_panel(&mut self) {
+        if self.center_panel_mode == crate::app::CenterPanelMode::BookList {
+            self.center_items.clear();
+            return;
+        }
+
+        let mut items = Vec::new();
+        let current_folder_id = self.current_folder.clone();
+
+        // 1. Get nested folders
+        let mut folders = Vec::new();
+        if let Some(tree) = &self.folder_tree {
+            for (_, node) in &tree.nodes {
+                if node.folder.parent_id == current_folder_id {
+                    folders.push(crate::app::CenterItem::Folder(node.folder.clone()));
+                }
+            }
+            folders.sort_by(|a, b| {
+                if let (crate::app::CenterItem::Folder(fa), crate::app::CenterItem::Folder(fb)) =
+                    (a, b)
+                {
+                    fa.name.cmp(&fb.name)
+                } else {
+                    std::cmp::Ordering::Equal
+                }
+            });
+        }
+
+        // 2. Get folder's books
+        let mut books = Vec::new();
+        if let Some(ref db) = self.db {
+            if let Ok(folder_books) = db.list_books_by_folder_id(current_folder_id.as_deref(), 1000)
+            {
+                for book in folder_books {
+                    books.push(crate::app::CenterItem::Book(book));
+                }
+            }
+        }
+
+        // 3. Sort accordingly
+        match self.folder_view_sort {
+            crate::app::FolderViewSort::FoldersFirst => {
+                items.extend(folders);
+                items.extend(books);
+            }
+            crate::app::FolderViewSort::BooksFirst => {
+                items.extend(books);
+                items.extend(folders);
+            }
+            crate::app::FolderViewSort::Mixed => {
+                items.extend(folders);
+                items.extend(books);
+                items.sort_by(|a, b| {
+                    let name_a = match a {
+                        crate::app::CenterItem::Folder(f) => f.name.to_lowercase(),
+                        crate::app::CenterItem::Book(bk) => bk.title.to_lowercase(),
+                    };
+                    let name_b = match b {
+                        crate::app::CenterItem::Folder(f) => f.name.to_lowercase(),
+                        crate::app::CenterItem::Book(bk) => bk.title.to_lowercase(),
+                    };
+                    name_a.cmp(&name_b)
+                });
+            }
+        }
+
+        self.center_items = items;
+        if self.selected_index >= self.center_items.len() {
+            self.selected_index = self.center_items.len().saturating_sub(1);
         }
     }
 
@@ -138,5 +273,23 @@ impl App {
         self.apply_filter();
         self.active_panel = ActivePanel::BookList;
         self.status_message = format!("Folder: {}", path);
+    }
+
+    /// Toggle expansion of the currently selected folder in the sidebar
+    pub fn toggle_folder_expansion(&mut self) {
+        if let Some(SidebarItem::FolderNode {
+            id, has_children, ..
+        }) = self.sidebar_items.get(self.sidebar_selected)
+        {
+            if *has_children {
+                let id_clone = id.clone();
+                if self.expanded_folders.contains(&id_clone) {
+                    self.expanded_folders.remove(&id_clone);
+                } else {
+                    self.expanded_folders.insert(id_clone);
+                }
+                self.refresh_sidebar();
+            }
+        }
     }
 }

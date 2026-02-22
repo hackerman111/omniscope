@@ -17,6 +17,8 @@ pub enum Popup {
     Telescope(TelescopeState),
     /// Help screen.
     Help,
+<<<<<<< gemini
+=======
     /// EasyMotion overlay.
     EasyMotion(EasyMotionState),
     /// Selection of marks.
@@ -31,6 +33,23 @@ pub enum Popup {
     AddTagPrompt { indices: Vec<usize>, input: String, cursor: usize },
     /// Prompt input for removing a tag from a range of books.
     RemoveTagPrompt { indices: Vec<usize>, available_tags: Vec<String>, selected: usize },
+    /// Create a new folder.
+    CreateFolder { parent_id: Option<String>, input: String, cursor: usize },
+    /// Rename an existing folder.
+    RenameFolder { folder_id: String, old_name: String, input: String, cursor: usize },
+    /// Confirm deletion of a folder.
+    ConfirmDeleteFolder { folder_id: String, folder_name: String, keep_files: bool },
+    /// Confirm bulk deletion of folders.
+    BulkDeleteFolders { folder_ids: Vec<String>, keep_files: bool },
+    /// Attach a file to a ghost book.
+    AttachGhostFile { book_id: String, input: String, cursor: usize, autocomplete: AutocompleteState },
+    /// Prompt showing how to find/download a placeholder for a ghost file.
+    FindGhostFilePlaceholder { book_id: String },
+    /// Create a new virtual folder.
+    CreateVirtualFolder { input: String, cursor: usize },
+    /// Add a book to a virtual folder.
+    AddToVirtualFolder { book_idx: usize, selected_folder_idx: usize, folders: Vec<omniscope_core::models::Folder> },
+>>>>>>> local
 }
 
 /// Telescope internal mode (vim-like).

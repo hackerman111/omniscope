@@ -46,7 +46,9 @@ pub fn run_tui(app: &mut App) -> Result<()> {
         match event_handler.next()? {
             AppEvent::Key(key) => keys::handle_key(app, key.code, key.modifiers),
             AppEvent::Resize(_, _) => {}
-            AppEvent::Tick => {}
+            AppEvent::Tick => {
+                app.pump_watcher_events();
+            }
         }
 
         // Handle pending editor launch (requires terminal suspension)

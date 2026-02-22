@@ -49,13 +49,32 @@ pub fn handle_g_command(app: &mut App, code: KeyCode) {
         // gp — Go Parent (up one level in hierarchy)
         KeyCode::Char('p') => {
             app.record_jump();
-            if let crate::app::SidebarFilter::All = app.sidebar_filter {
-                // Already at top
-                app.status_message = "Already at root".to_string();
+            
+            // Check if we are inside a folder
+            if let crate::app::SidebarFilter::Folder(ref current_folder) = app.sidebar_filter {
+                let current_id = current_folder.clone();
+                let mut parent_id = None;
+                
+                // Try to find the parent in the folder tree
+                if let Some(ref tree) = app.folder_tree {
+                    if let Some(node) = tree.nodes.get(&current_id) {
+                        parent_id = node.folder.parent_id.clone();
+                    }
+                }
+                
+                if let Some(pid) = parent_id {
+                    // Go up to parent folder
+                    app.sidebar_filter = crate::app::SidebarFilter::Folder(pid);
+                    app.refresh_books();
+                    app.status_message = "Go Parent".to_string();
+                } else {
+                    // We are at a top-level folder, so parent is Root
+                    app.sidebar_filter = crate::app::SidebarFilter::All;
+                    app.refresh_books();
+                    app.status_message = "Go Root".to_string();
+                }
             } else {
-                app.sidebar_filter = crate::app::SidebarFilter::All;
-                app.refresh_books();
-                app.status_message = "Go Parent".to_string();
+                app.status_message = "Already at root".to_string();
             }
         }
 
@@ -71,7 +90,13 @@ pub fn handle_g_command(app: &mut App, code: KeyCode) {
 
         // gf — open file in OS (open book's file)
         KeyCode::Char('f') => {
-            app.open_selected_book();
+            if let Some(book) = app.selected_book() {
+                if !book.has_file || matches!(book.file_presence, omniscope_core::FilePresence::Missing { .. }) {
+                    app.popup = Some(Popup::FindGhostFilePlaceholder { book_id: book.id.to_string() });
+                } else {
+                    app.open_selected_book();
+                }
+            }
         }
 
         // gI — open JSON card in $EDITOR
@@ -89,21 +114,15 @@ pub fn handle_g_command(app: &mut App, code: KeyCode) {
             }
         }
 
-        // gv — reselect last visual selection
+        // gv — toggle CenterPanelMode
         KeyCode::Char('v') => {
-            if let Some((start, end)) = app.last_visual_range {
-                let max_idx = app.books.len().saturating_sub(1);
-                let start = start.min(max_idx);
-                let end = end.min(max_idx);
-                app.visual_anchor = Some(start);
-                app.selected_index = end;
-                app.mode = Mode::Visual;
-                app.visual_selections = (start..=end).collect();
-                app.status_message =
-                    format!("-- VISUAL -- {} selected", app.visual_selections.len());
+            app.center_panel_mode = if app.center_panel_mode == crate::app::CenterPanelMode::BookList {
+                crate::app::CenterPanelMode::FolderView
             } else {
-                app.status_message = "No previous visual selection".to_string();
-            }
+                crate::app::CenterPanelMode::BookList
+            };
+            app.refresh_center_panel();
+            app.status_message = format!("Center view: {:?}", app.center_panel_mode);
         }
 
         // gz — center view (alias for zz)
@@ -141,10 +160,10 @@ pub fn handle_g_command(app: &mut App, code: KeyCode) {
         // gF — goto Folder: filter by folder path
         KeyCode::Char('F') => {
             if app.active_panel == crate::app::ActivePanel::Sidebar {
-                if let Some(crate::app::SidebarItem::Folder { path }) =
+                if let Some(crate::app::SidebarItem::FolderNode { disk_path, .. }) =
                     app.sidebar_items.get(app.sidebar_selected)
                 {
-                    let path = path.clone();
+                    let path = disk_path.clone();
                     app.filter_by_folder(&path);
                 }
             } else if let Some(book) = app.selected_book() {

@@ -4,12 +4,17 @@ use std::time::Instant;
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
+<<<<<<< gemini
+use omniscope_core::{AppConfig, BookCard, Database};
+=======
 use omniscope_core::{
     AppConfig, BookCard, Database, GlobalConfig, LibraryRoot,
     init_library, InitOptions,
     scan_library, ScanOptions,
-    FolderTemplate, scaffold_template, sync_folders,
+    FolderTemplate, scaffold_template,
 };
+use omniscope_core::sync::FolderSync;
+>>>>>>> local
 use omniscope_tui::app::App;
 
 // ─── CLI Definition ─────────────────────────────────────────────────────────
@@ -109,6 +114,8 @@ enum Commands {
 
     /// Show version information.
     Version,
+<<<<<<< gemini
+=======
 
     /// Initialize a new library in a directory.
     Init {
@@ -144,6 +151,13 @@ enum Commands {
         #[command(subcommand)]
         action: LibrariesAction,
     },
+
+    /// Manage the library filesystem watcher.
+    Watch {
+        #[command(subcommand)]
+        action: WatchAction,
+    },
+>>>>>>> local
 }
 
 // ─── Libraries Actions ──────────────────────────────────────────────────────
@@ -246,6 +260,8 @@ enum LibraryAction {
     Rename { old: String, new: String },
 }
 
+<<<<<<< gemini
+=======
 // ─── Folder Actions ──────────────────────────────────────────────────────────
 
 #[derive(Subcommand)]
@@ -292,8 +308,19 @@ enum ConfigAction {
     Set { key: String, value: String },
 }
 
+// ─── Watch Actions ───────────────────────────────────────────────────────────
+
+#[derive(Subcommand)]
+enum WatchAction {
+    /// Start the watcher in the foreground.
+    Start,
+    /// Shows watcher configuration status.
+    Status,
+}
+
 // ─── Main ────────────────────────────────────────────────────────────────────
 
+>>>>>>> local
 fn main() -> Result<()> {
     let start = Instant::now();
     let cli = Cli::parse();
@@ -766,6 +793,8 @@ fn main() -> Result<()> {
             }
         },
 
+<<<<<<< gemini
+=======
         // ── Folder ─────────────────────────────────────────────────────────
 
         Some(Commands::Folder { action }) => match action {
@@ -793,8 +822,10 @@ fn main() -> Result<()> {
                 }
             }
             FolderAction::Delete { id } => {
-                let db = open_db(&config)?;
-                db.delete_folder(&id)?;
+                let lr = require_library(&library_root, json_output)?;
+                let db = open_db_from_root(&lr)?;
+                let ops = omniscope_core::sync::FolderOps::new(&lr, &db);
+                ops.delete_folder(&id, false)?;
                 let dur = start.elapsed().as_millis();
                 if json_output {
                     print_json(&serde_json::json!({"status":"ok","data":{"deleted":id},"meta":{"duration_ms":dur}}))?;
@@ -803,8 +834,10 @@ fn main() -> Result<()> {
                 }
             }
             FolderAction::Rename { id, name } => {
-                let db = open_db(&config)?;
-                db.rename_folder(&id, &name)?;
+                let lr = require_library(&library_root, json_output)?;
+                let db = open_db_from_root(&lr)?;
+                let ops = omniscope_core::sync::FolderOps::new(&lr, &db);
+                ops.rename_folder(&id, &name)?;
                 let dur = start.elapsed().as_millis();
                 if json_output {
                     print_json(&serde_json::json!({"status":"ok","data":{"id":id,"name":name},"meta":{"duration_ms":dur}}))?;
@@ -851,7 +884,8 @@ fn main() -> Result<()> {
                 let lr = require_library(&library_root, json_output)?;
                 let db = open_db_from_root(&lr)?;
 
-                let report = sync_folders(&lr, &db)?;
+                let sync = FolderSync::new(&lr, &db);
+                let report = sync.full_scan()?;
                 let dur = start.elapsed().as_millis();
 
                 if json_output {
@@ -936,6 +970,7 @@ fn main() -> Result<()> {
 
         // ── Stats ──────────────────────────────────────────────────────────
 
+>>>>>>> local
         Some(Commands::Stats) => {
             let db = open_db(&config)?;
             let count = db.count_books()?;
@@ -1013,6 +1048,8 @@ fn main() -> Result<()> {
                 println!("omniscope v{version}");
             }
         }
+<<<<<<< gemini
+=======
 
         // ── Init ───────────────────────────────────────────────────────────
 
@@ -1164,11 +1201,64 @@ fn main() -> Result<()> {
                     println!("Removed '{}' from known libraries. Data is NOT deleted.", path);
                 }
             }
+        }
+        Some(Commands::Watch { action }) => match action {
+            WatchAction::Start => {
+                let lr = require_library(&library_root, json_output)?;
+                let manifest = lr.load_manifest()?;
+                
+                if json_output {
+                    print_json(&serde_json::json!({"status":"ok","message":"Watcher starting in foreground. Press Ctrl+C to stop."}))?;
+                } else {
+                    println!("Starting watcher on: {}", lr.root().display());
+                    println!("Monitoring for: {:?}", manifest.settings.watcher.watch_extensions);
+                }
+                
+                let (watcher, rx) = omniscope_core::sync::LibraryWatcher::start(
+                    lr.root().to_path_buf(),
+                    manifest.settings.watcher,
+                )?;
+                
+                // Block and print events
+                while let Ok(event) = rx.recv() {
+                    let event_json = serde_json::to_string(&event).unwrap_or_default();
+                    if json_output {
+                        println!("{}", event_json);
+                    } else {
+                        match event {
+                            omniscope_core::sync::WatcherEvent::NewBookFile { path } => println!("New file: {}", path.display()),
+                            omniscope_core::sync::WatcherEvent::BookFileRemoved { path } => println!("Removed: {}", path.display()),
+                            omniscope_core::sync::WatcherEvent::DirectoryCreated { path } => println!("New dir: {}", path.display()),
+                            omniscope_core::sync::WatcherEvent::DirectoryRemoved { path } => println!("Removed dir: {}", path.display()),
+                            omniscope_core::sync::WatcherEvent::BookFileRenamed { from, to } => println!("Renamed: {} -> {}", from.display(), to.display()),
+                            omniscope_core::sync::WatcherEvent::DirectoryRenamed { from, to } => println!("Renamed dir: {} -> {}", from.display(), to.display()),
+                        }
+                    }
+                }
+                
+                drop(watcher);
+            }
+            WatchAction::Status => {
+                let lr = require_library(&library_root, json_output)?;
+                let manifest = lr.load_manifest()?;
+                let watcher_cfg = manifest.settings.watcher;
+                
+                if json_output {
+                    print_json(&serde_json::json!({"status":"ok","data":watcher_cfg}))?;
+                } else {
+                    println!("Watcher configuration:");
+                    println!("  Auto Import: {}", watcher_cfg.auto_import);
+                    println!("  Debounce: {} ms", watcher_cfg.debounce_ms);
+                    println!("  Min Size: {} bytes", watcher_cfg.min_file_size_bytes);
+                    println!("  Extensions: {:?}", watcher_cfg.watch_extensions);
+                }
+            }
         },
     }
 
     if timing {
         eprintln!("[timing] total {:.1}ms", start.elapsed().as_secs_f64() * 1000.0);
+>>>>>>> local
     }
 
     Ok(())

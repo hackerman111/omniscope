@@ -28,7 +28,7 @@ chrono = { version = "0.4", features = ["serde"] }
 ulid = { version = "1", features = ["serde"] }
 
 # Database
-rusqlite = { version = "0.32", features = ["bundled", "serde_json"] }
+rusqlite = { version = "0.32", features = ["bundled", "serde_json", "chrono"] }
 
 # Error handling
 thiserror = "2"

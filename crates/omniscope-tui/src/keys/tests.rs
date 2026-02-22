@@ -37,6 +37,8 @@ fn create_test_app() -> (App, TempDir) {
             tags: card.organization.tags.clone(),
             frecency_score: 0.0,
             has_file: false,
+            file_presence: omniscope_core::models::folder::FilePresence::default(),
+            path: None,
         };
         app.all_books.push(view.clone());
         app.books.push(view);
@@ -610,15 +612,16 @@ fn test_cy_opens_year_edit_popup() {
 }
 
 #[test]
-fn test_ca_opens_authors_edit_popup() {
+fn test_cA_opens_authors_edit_popup() {
     let (mut app, _temp) = create_test_app();
 
-    // ca should open EditAuthors popup, NOT AddBook
-    run_keys(&mut app, "ca");
+    // cA (Shift+a) should open EditAuthors popup, NOT AddBook
+    // Note: 'ca' is now a text object prefix (change around...)
+    run_keys(&mut app, "cA");
 
     assert!(
         matches!(app.popup, Some(crate::popup::Popup::EditAuthors { .. })),
-        "ca should open EditAuthors popup, not AddBook"
+        "cA should open EditAuthors popup, not AddBook"
     );
 }
 

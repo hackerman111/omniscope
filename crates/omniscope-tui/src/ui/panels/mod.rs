@@ -5,12 +5,18 @@ pub mod left;
 pub mod quickfix;
 pub mod right;
 pub mod statusbar;
+pub mod sync;
 
 use crate::app::App;
 use ratatui::layout::Rect;
 use ratatui::Frame;
 
 pub fn render_body(frame: &mut Frame, app: &App, area: Rect) {
+    if app.active_panel == crate::app::ActivePanel::Sync {
+        sync::render(frame, app, area);
+        return;
+    }
+
     let body_area = if app.quickfix_show {
         let chunks = ratatui::layout::Layout::default()
             .direction(ratatui::layout::Direction::Vertical)

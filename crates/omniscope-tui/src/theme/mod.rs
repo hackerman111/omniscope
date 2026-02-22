@@ -70,6 +70,8 @@ impl NordTheme {
     pub fn yellow(&self) -> Color { self.nord13 }
     pub fn green(&self) -> Color { self.nord14 }
     pub fn purple(&self) -> Color { self.nord15 }
+    pub fn cyan(&self) -> Color { self.nord8 }
+    pub fn text(&self) -> Color { self.nord4 }
 
     // Logic aliases
     pub fn cursor_bg(&self) -> Color { self.frost_dark() }

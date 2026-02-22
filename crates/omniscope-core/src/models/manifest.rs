@@ -61,6 +61,42 @@ pub struct LibrarySettings {
 
     #[serde(default)]
     pub auto_index: bool,
+
+    #[serde(default)]
+    pub watcher: WatcherConfig,
+}
+
+/// Configuration for the automatic filesystem watcher
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WatcherConfig {
+    /// Automatically import new files (create instances)
+    pub auto_import: bool,
+    /// Debounce delay before processing filesystem events
+    pub debounce_ms: u64,
+    /// Minimum file size to consider an import valid
+    pub min_file_size_bytes: u64,
+    /// File extensions to automatically track
+    pub watch_extensions: Vec<String>,
+}
+
+impl Default for WatcherConfig {
+    fn default() -> Self {
+        Self {
+            auto_import: false, // Default strictly ignores auto import by default
+            debounce_ms: 2000,
+            min_file_size_bytes: 1024,
+            watch_extensions: vec![
+                "pdf".to_string(),
+                "epub".to_string(),
+                "djvu".to_string(),
+                "fb2".to_string(),
+                "mobi".to_string(),
+                "azw3".to_string(),
+                "cbz".to_string(),
+                "cbr".to_string(),
+            ],
+        }
+    }
 }
 
 impl LibraryManifest {

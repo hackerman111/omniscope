@@ -1,4 +1,4 @@
-use super::{ActivePanel, App};
+use super::{ActivePanel, App, CenterPanelMode};
 
 impl App {
     // ─── Navigation ────────────────────────────────────────
@@ -6,7 +6,13 @@ impl App {
     pub fn move_down(&mut self) {
         match self.active_panel {
             ActivePanel::BookList => {
-                if !self.books.is_empty() && self.selected_index < self.books.len() - 1 {
+                if self.center_panel_mode == CenterPanelMode::FolderView {
+                    if !self.center_items.is_empty()
+                        && self.selected_index < self.center_items.len() - 1
+                    {
+                        self.selected_index += 1;
+                    }
+                } else if !self.books.is_empty() && self.selected_index < self.books.len() - 1 {
                     self.selected_index += 1;
                 }
             }
@@ -18,6 +24,7 @@ impl App {
                 }
             }
             ActivePanel::Preview => {}
+            ActivePanel::Sync => {}
         }
     }
 
@@ -34,6 +41,7 @@ impl App {
                 }
             }
             ActivePanel::Preview => {}
+            ActivePanel::Sync => {}
         }
     }
 
@@ -42,14 +50,20 @@ impl App {
             ActivePanel::BookList => self.selected_index = 0,
             ActivePanel::Sidebar => self.sidebar_selected = 0,
             ActivePanel::Preview => {}
+            ActivePanel::Sync => {}
         }
     }
 
     pub fn move_to_bottom(&mut self) {
         match self.active_panel {
             ActivePanel::BookList => {
-                if !self.books.is_empty() {
-                    self.selected_index = self.books.len() - 1;
+                let max_idx = if self.center_panel_mode == CenterPanelMode::FolderView {
+                    self.center_items.len()
+                } else {
+                    self.books.len()
+                };
+                if max_idx > 0 {
+                    self.selected_index = max_idx - 1;
                 }
             }
             ActivePanel::Sidebar => {
@@ -58,6 +72,7 @@ impl App {
                 }
             }
             ActivePanel::Preview => {}
+            ActivePanel::Sync => {}
         }
     }
 
@@ -66,6 +81,7 @@ impl App {
             ActivePanel::BookList => ActivePanel::Sidebar,
             ActivePanel::Preview => ActivePanel::BookList,
             ActivePanel::Sidebar => ActivePanel::Sidebar,
+            ActivePanel::Sync => ActivePanel::Sync,
         };
     }
 
@@ -74,6 +90,7 @@ impl App {
             ActivePanel::Sidebar => ActivePanel::BookList,
             ActivePanel::BookList => ActivePanel::Preview,
             ActivePanel::Preview => ActivePanel::Preview,
+            ActivePanel::Sync => ActivePanel::Sync,
         };
     }
 
@@ -103,22 +120,21 @@ impl App {
     }
 
     pub fn jump_back(&mut self) {
-        // If we are currently "live" (not traversing history already), we might need to push current pos?
-        // Standard vim: if you jump back, you are traversing.
-        // But if you were not traversing, your current pos is saved in jump list (as the "newest").
-        // Our jump list implementation manages `current` index.
-        // We need to:
-        // 1. Get previous location from jump list
-        // 2. Move selected_index to there
         if let Some(loc) = self.jump_list.back() {
-            // Restore position
-            // Ideally check book_id compatibility, but index is fallback
-            // In a virtualized list, index might be unstable if sort changed.
-            // But Phase 1: simple index.
-            if loc.index < self.books.len() {
+            let max_len = if self.center_panel_mode == crate::app::CenterPanelMode::FolderView {
+                self.center_items.len()
+            } else {
+                self.books.len()
+            };
+
+            if loc.index < max_len {
                 self.selected_index = loc.index;
                 self.status_message = format!("Jump back to {}", loc.index + 1);
+            } else if max_len > 0 {
+                self.selected_index = max_len - 1;
+                self.status_message = format!("Jump target clamped to {}", max_len);
             } else {
+                self.selected_index = 0;
                 self.status_message = "Jump target out of range".to_string();
             }
         } else {
@@ -128,9 +144,21 @@ impl App {
 
     pub fn jump_forward(&mut self) {
         if let Some(loc) = self.jump_list.forward() {
-            if loc.index < self.books.len() {
+            let max_len = if self.center_panel_mode == crate::app::CenterPanelMode::FolderView {
+                self.center_items.len()
+            } else {
+                self.books.len()
+            };
+
+            if loc.index < max_len {
                 self.selected_index = loc.index;
                 self.status_message = format!("Jump forward to {}", loc.index + 1);
+            } else if max_len > 0 {
+                self.selected_index = max_len - 1;
+                self.status_message = format!("Jump target clamped to {}", max_len);
+            } else {
+                self.selected_index = 0;
+                self.status_message = "Jump target out of range".to_string();
             }
         } else {
             self.status_message = "At top of jump list".to_string();
@@ -143,6 +171,24 @@ impl App {
         // Equivalent to '-' or Backspace
         match self.active_panel {
             ActivePanel::BookList => {
+                if self.center_panel_mode == crate::app::CenterPanelMode::FolderView {
+                    if let Some(ref current_id) = self.current_folder.clone() {
+                        let mut next_id = None;
+                        if let Some(ref tree) = self.folder_tree {
+                            if let Some(node) = tree.nodes.get(current_id) {
+                                next_id = node.folder.parent_id.clone();
+                            }
+                        }
+                        self.current_folder = next_id;
+                        self.selected_index = 0;
+                        self.refresh_center_panel();
+                        self.status_message = "Up to parent folder".to_string();
+                    } else {
+                        self.status_message = "Already at root".to_string();
+                    }
+                    return;
+                }
+
                 // If filtered, clear filter (go to All)
                 // If in folder, go to parent folder (Phase 2)
                 match self.sidebar_filter {

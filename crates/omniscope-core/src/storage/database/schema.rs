@@ -2,7 +2,7 @@ use rusqlite::Connection;
 
 use crate::error::Result;
 
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
 
 pub fn apply_pragmas(conn: &Connection) -> Result<()> {
     conn.execute_batch(
@@ -41,7 +41,9 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
             summary     TEXT,
             key_topics  TEXT DEFAULT '[]',
             updated_at  TEXT NOT NULL,
-            frecency_score REAL DEFAULT 0.0
+            frecency_score REAL DEFAULT 0.0,
+            file_presence  TEXT NOT NULL DEFAULT '{\"type\": \"never_had_file\"}',
+            folder_id      TEXT REFERENCES folders(id) ON DELETE SET NULL
         );
 
         CREATE TABLE IF NOT EXISTS tags (
@@ -63,10 +65,22 @@ pub fn create_tables(conn: &Connection) -> Result<()> {
         CREATE TABLE IF NOT EXISTS folders (
             id          TEXT PRIMARY KEY,
             name        TEXT NOT NULL,
-            parent_id   TEXT,
+            folder_type TEXT NOT NULL CHECK(folder_type IN ('physical', 'virtual', 'library_root')) DEFAULT 'physical',
+            parent_id   TEXT REFERENCES folders(id) ON DELETE CASCADE,
             library_id  TEXT,
             disk_path   TEXT,
-            FOREIGN KEY (parent_id) REFERENCES folders(id) ON DELETE SET NULL
+            icon        TEXT,
+            color       TEXT,
+            sort_order  INTEGER DEFAULT 0,
+            created_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at  TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS book_virtual_folders (
+            book_id     TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+            folder_id   TEXT NOT NULL REFERENCES folders(id) ON DELETE CASCADE,
+            added_at    TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (book_id, folder_id)
         );
 
         CREATE TABLE IF NOT EXISTS action_log (
@@ -91,6 +105,8 @@ pub fn create_indexes(conn: &Connection) -> Result<()> {
         CREATE INDEX IF NOT EXISTS idx_books_doi         ON books(doi);
         CREATE INDEX IF NOT EXISTS idx_books_arxiv_id    ON books(arxiv_id);
         CREATE INDEX IF NOT EXISTS idx_folders_disk_path ON folders(disk_path);
+        CREATE INDEX IF NOT EXISTS idx_folders_parent    ON folders(parent_id);
+        CREATE INDEX IF NOT EXISTS idx_books_folder      ON books(folder_id);
         ",
     )?;
     Ok(())

@@ -654,6 +654,296 @@ pub(crate) fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModif
             _ => {}
         },
 
+        Some(Popup::CreateFolder { .. }) => match code {
+            KeyCode::Esc => {
+                app.popup = None;
+            }
+            KeyCode::Enter => {
+                if let Some(Popup::CreateFolder { parent_id, input, .. }) = app.popup.take() {
+                    app.submit_create_folder(parent_id, &input);
+                }
+            }
+            KeyCode::Backspace => {
+                if let Some(Popup::CreateFolder { ref mut input, ref mut cursor, .. }) = app.popup {
+                    if *cursor > 0 {
+                        input.remove(*cursor - 1);
+                        *cursor -= 1;
+                    }
+                }
+            }
+            KeyCode::Char(c) => {
+                if let Some(Popup::CreateFolder { ref mut input, ref mut cursor, .. }) = app.popup {
+                    input.insert(*cursor, c);
+                    *cursor += c.len_utf8();
+                }
+            }
+            _ => {}
+        },
+
+        Some(Popup::RenameFolder { .. }) => match code {
+            KeyCode::Esc => {
+                app.popup = None;
+            }
+            KeyCode::Enter => {
+                if let Some(Popup::RenameFolder { folder_id, input, .. }) = app.popup.take() {
+                    app.submit_rename_folder(&folder_id, &input);
+                }
+            }
+            KeyCode::Backspace => {
+                if let Some(Popup::RenameFolder { ref mut input, ref mut cursor, .. }) = app.popup {
+                    if *cursor > 0 {
+                        input.remove(*cursor - 1);
+                        *cursor -= 1;
+                    }
+                }
+            }
+            KeyCode::Char(c) => {
+                if let Some(Popup::RenameFolder { ref mut input, ref mut cursor, .. }) = app.popup {
+                    input.insert(*cursor, c);
+                    *cursor += c.len_utf8();
+                }
+            }
+            _ => {}
+        },
+
+        Some(Popup::ConfirmDeleteFolder { .. }) => match code {
+            KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
+                app.popup = None;
+            }
+            KeyCode::Char('y') | KeyCode::Char('Y') => {
+                if let Some(Popup::ConfirmDeleteFolder { folder_id, keep_files, .. }) = app.popup.take() {
+                    app.submit_delete_folder(&folder_id, keep_files);
+                }
+            }
+            KeyCode::Tab => {
+                if let Some(Popup::ConfirmDeleteFolder { ref mut keep_files, .. }) = app.popup {
+                    *keep_files = !*keep_files;
+                }
+            }
+            _ => {}
+        },
+
+        Some(Popup::BulkDeleteFolders { .. }) => match code {
+            KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
+                app.popup = None;
+            }
+            KeyCode::Char('y') | KeyCode::Char('Y') => {
+                if let Some(Popup::BulkDeleteFolders { folder_ids, keep_files }) = app.popup.take() {
+                    app.submit_bulk_delete_folders(&folder_ids, keep_files);
+                }
+            }
+            KeyCode::Tab => {
+                if let Some(Popup::BulkDeleteFolders { ref mut keep_files, .. }) = app.popup {
+                    *keep_files = !*keep_files;
+                }
+            }
+            _ => {}
+        },
+
+        Some(Popup::AttachGhostFile { .. }) => match code {
+            KeyCode::Esc => {
+                if let Some(Popup::AttachGhostFile { ref mut autocomplete, .. }) = app.popup {
+                    if autocomplete.active {
+                        autocomplete.clear();
+                    } else {
+                        app.popup = None;
+                    }
+                }
+            }
+            KeyCode::Enter => {
+                let mut should_submit = false;
+                let mut attach_id = String::new();
+                let mut attach_path = String::new();
+
+                if let Some(Popup::AttachGhostFile { ref mut autocomplete, ref mut input, ref book_id, .. }) = app.popup {
+                    if autocomplete.active {
+                        if let Some(selection) = autocomplete.current().map(|s| s.to_string()) {
+                            let current = input.clone();
+                            let expanded = if current.starts_with("~/") {
+                                if let Some(home) = dirs::home_dir() {
+                                    current.replacen("~", &home.to_string_lossy(), 1)
+                                } else {
+                                    current.clone()
+                                }
+                            } else {
+                                current.clone()
+                            };
+
+                            let path = std::path::Path::new(&expanded);
+                            let dir = if expanded.ends_with('/') {
+                                path.to_path_buf()
+                            } else {
+                                path.parent().unwrap_or(std::path::Path::new(".")).to_path_buf()
+                            };
+
+                            let new_full_path = dir.join(&selection).to_string_lossy().to_string();
+
+                            let final_val = if current.starts_with("~/") {
+                                if let Some(home) = dirs::home_dir() {
+                                    let h = home.to_string_lossy();
+                                    if new_full_path.starts_with(h.as_ref()) {
+                                        new_full_path.replacen(h.as_ref(), "~", 1)
+                                    } else {
+                                        new_full_path
+                                    }
+                                } else {
+                                    new_full_path
+                                }
+                            } else {
+                                new_full_path
+                            };
+
+                            *input = final_val;
+
+                            let check_path = if input.starts_with("~/") {
+                                if let Some(home) = dirs::home_dir() {
+                                    input.replacen("~", &home.to_string_lossy(), 1)
+                                } else {
+                                    input.clone()
+                                }
+                            } else {
+                                input.clone()
+                            };
+
+                            if let Ok(m) = std::fs::metadata(&check_path) {
+                                if m.is_dir() && !input.ends_with('/') {
+                                    input.push('/');
+                                }
+                            }
+                            autocomplete.clear();
+                        } else {
+                            autocomplete.clear();
+                        }
+                        
+                        if input.ends_with('/') {
+                            update_ghost_filepath_suggestions(input, autocomplete);
+                        }
+                        
+                    } else {
+                        should_submit = true;
+                        attach_id = book_id.clone();
+                        attach_path = input.clone();
+                    }
+                }
+
+                if should_submit {
+                    app.popup = None;
+                    if !attach_path.is_empty() {
+                        if let Some(ref db) = app.db {
+                            if let Ok(uuid) = uuid::Uuid::parse_str(&attach_id) {
+                                if let Ok(mut card) = omniscope_core::storage::json_cards::load_card_by_id(&app.cards_dir(), &uuid) {
+                                    card.file = Some(omniscope_core::models::book::BookFile {
+                                        path: attach_path.clone(),
+                                        format: omniscope_core::models::book::FileFormat::Pdf, // Default assumption
+                                        size_bytes: 0,
+                                        hash_sha256: None,
+                                        added_at: chrono::Utc::now(),
+                                    });
+                                    let _ = omniscope_core::storage::json_cards::save_card(&app.cards_dir(), &card);
+                                    let _ = db.upsert_book(&card);
+                                    app.refresh_books();
+                                    app.status_message = format!("Attached {} to {}", attach_path, attach_id);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            KeyCode::Tab => {
+                if let Some(Popup::AttachGhostFile { ref mut autocomplete, .. }) = app.popup {
+                    if autocomplete.active {
+                        autocomplete.move_down();
+                    }
+                }
+            }
+            KeyCode::BackTab => {
+                if let Some(Popup::AttachGhostFile { ref mut autocomplete, .. }) = app.popup {
+                    if autocomplete.active {
+                        autocomplete.move_up();
+                    }
+                }
+            }
+            KeyCode::Backspace => {
+                if let Some(Popup::AttachGhostFile { ref mut input, ref mut cursor, ref mut autocomplete, .. }) = app.popup {
+                    if *cursor > 0 {
+                        input.remove(*cursor - 1);
+                        *cursor -= 1;
+                        if input.is_empty() {
+                            autocomplete.clear();
+                        } else {
+                            update_ghost_filepath_suggestions(input, autocomplete);
+                        }
+                    }
+                }
+            }
+            KeyCode::Char(c) => {
+                if let Some(Popup::AttachGhostFile { ref mut input, ref mut cursor, ref mut autocomplete, .. }) = app.popup {
+                    input.insert(*cursor, c);
+                    *cursor += c.len_utf8();
+                    update_ghost_filepath_suggestions(input, autocomplete);
+                }
+            }
+            _ => {}
+        },
+
+        Some(Popup::FindGhostFilePlaceholder { .. }) => {
+            app.popup = None;
+        },
+
+        Some(Popup::CreateVirtualFolder { .. }) => match code {
+            KeyCode::Esc => {
+                app.popup = None;
+            }
+            KeyCode::Enter => {
+                if let Some(Popup::CreateVirtualFolder { input, .. }) = app.popup.take() {
+                    app.submit_create_virtual_folder(&input);
+                }
+            }
+            KeyCode::Backspace => {
+                if let Some(Popup::CreateVirtualFolder { ref mut input, ref mut cursor, .. }) = app.popup {
+                    if *cursor > 0 {
+                        input.remove(*cursor - 1);
+                        *cursor -= 1;
+                    }
+                }
+            }
+            KeyCode::Char(c) => {
+                if let Some(Popup::CreateVirtualFolder { ref mut input, ref mut cursor, .. }) = app.popup {
+                    input.insert(*cursor, c);
+                    *cursor += c.len_utf8();
+                }
+            }
+            _ => {}
+        },
+
+        Some(Popup::AddToVirtualFolder { .. }) => match code {
+            KeyCode::Esc => {
+                app.popup = None;
+            }
+            KeyCode::Enter => {
+                if let Some(Popup::AddToVirtualFolder { book_idx, selected_folder_idx, folders }) = app.popup.take() {
+                    if let Some(folder) = folders.get(selected_folder_idx) {
+                        app.submit_add_to_virtual_folder(book_idx, &folder.id);
+                    }
+                }
+            }
+            KeyCode::Char('j') | KeyCode::Down => {
+                if let Some(Popup::AddToVirtualFolder { ref mut selected_folder_idx, ref folders, .. }) = app.popup {
+                    if !folders.is_empty() && *selected_folder_idx + 1 < folders.len() {
+                        *selected_folder_idx += 1;
+                    }
+                }
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                if let Some(Popup::AddToVirtualFolder { ref mut selected_folder_idx, .. }) = app.popup {
+                    if *selected_folder_idx > 0 {
+                        *selected_folder_idx -= 1;
+                    }
+                }
+            }
+            _ => {}
+        },
+
         None => {}
     }
 }
@@ -711,5 +1001,58 @@ fn update_filepath_suggestions(form: &mut crate::popup::AddBookForm) {
         }
     } else {
         form.autocomplete.clear();
+    }
+}
+
+fn update_ghost_filepath_suggestions(input: &str, autocomplete: &mut crate::popup::AutocompleteState) {
+    let expanded_val = if input.starts_with("~/") {
+        if let Some(home) = dirs::home_dir() {
+            input.replacen("~", &home.to_string_lossy(), 1)
+        } else {
+            input.to_string()
+        }
+    } else {
+        input.to_string()
+    };
+
+    let (search_dir, prefix) = if expanded_val.ends_with('/') {
+        (std::path::PathBuf::from(&expanded_val), "".to_string())
+    } else {
+        let p = std::path::Path::new(&expanded_val);
+        let parent = if let Some(p) = p.parent() {
+            if p.as_os_str().is_empty() {
+                std::path::PathBuf::from(".")
+            } else {
+                p.to_path_buf()
+            }
+        } else {
+            std::path::PathBuf::from(".")
+        };
+        let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
+        (parent, name.to_string())
+    };
+
+    if let Ok(entries) = std::fs::read_dir(&search_dir) {
+        let mut matches: Vec<String> = entries
+            .filter_map(|e| e.ok())
+            .map(|e| {
+                let name = e.file_name().to_string_lossy().to_string();
+                if e.path().is_dir() {
+                    name + "/"
+                } else {
+                    name
+                }
+            })
+            .filter(|name| name.starts_with(&prefix))
+            .collect();
+        match matches.len() {
+            0 => autocomplete.clear(),
+            _ => {
+                matches.sort();
+                autocomplete.activate(matches);
+            }
+        }
+    } else {
+        autocomplete.clear();
     }
 }

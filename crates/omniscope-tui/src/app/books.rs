@@ -268,6 +268,26 @@ impl App {
         }
     }
 
+    pub fn open_selected_center_item(&mut self) {
+        if self.center_panel_mode == crate::app::CenterPanelMode::BookList {
+            self.open_selected_book();
+            return;
+        }
+        if let Some(item) = self.center_items.get(self.selected_index).cloned() {
+            match item {
+                crate::app::CenterItem::Folder(f) => {
+                    self.current_folder = Some(f.id.clone());
+                    self.selected_index = 0;
+                    self.refresh_center_panel();
+                    self.status_message = format!("Entering: {}", f.name);
+                }
+                crate::app::CenterItem::Book(_) => {
+                    self.open_selected_book();
+                }
+            }
+        }
+    }
+
     /// Open selected book in external viewer.
     pub fn open_selected_book(&mut self) {
         if let Some(book) = self.selected_book() {
@@ -448,6 +468,25 @@ impl App {
 
     /// Perform fuzzy search on current query.
     pub fn fuzzy_search(&mut self, query: &str) {
+        if self.active_panel == crate::app::ActivePanel::Sidebar
+            && self.left_panel_mode == crate::app::LeftPanelMode::FolderTree
+        {
+            if query.is_empty() {
+                return;
+            }
+            let query_lower = query.to_lowercase();
+            if let Some(pos) = self.sidebar_items.iter().position(|item| {
+                if let crate::app::SidebarItem::FolderNode { name, .. } = item {
+                    name.to_lowercase().contains(&query_lower)
+                } else {
+                    false
+                }
+            }) {
+                self.sidebar_selected = pos;
+            }
+            return;
+        }
+
         if query.is_empty() {
             self.apply_filter();
             return;
@@ -615,5 +654,209 @@ impl App {
             return;
         };
         self.telescope_reload_candidates(&token);
+    }
+
+    // ── Folder Operations ──────────────────────────────────
+    pub fn rebuild_folder_tree(&mut self) {
+        if let Some(ref db) = self.db {
+            if let Ok(folders) = db.list_all_folders() {
+                self.folder_tree = Some(omniscope_core::models::FolderTree::build(folders));
+            }
+        }
+    }
+
+    pub fn submit_create_virtual_folder(&mut self, name: &str) {
+        self.popup = None;
+        if name.trim().is_empty() {
+            return;
+        }
+        if let Some(ref db) = self.db {
+            match db.create_virtual_folder(name.trim()) {
+                Ok(_) => {
+                    self.status_message = format!("Created virtual folder '{name}'");
+                    self.refresh_sidebar();
+                }
+                Err(e) => {
+                    self.status_message = format!("Error creating virtual folder: {e}");
+                }
+            }
+        }
+    }
+
+    pub fn submit_add_to_virtual_folder(&mut self, book_idx: usize, folder_id: &str) {
+        self.popup = None;
+        if let Some(book) = self.books.get(book_idx) {
+            let book_id_str = book.id.to_string();
+            let book_title = book.title.clone();
+            if let Some(ref db) = self.db {
+                match db.add_book_to_virtual_folder(&book_id_str, folder_id) {
+                    Ok(_) => {
+                        self.status_message = format!("Added '{book_title}' to virtual folder");
+                        self.refresh_sidebar(); // to update the counts
+                    }
+                    Err(e) => {
+                        self.status_message = format!("Error adding to virtual folder: {e}");
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn submit_create_folder(&mut self, parent_id: Option<String>, name: &str) {
+        self.popup = None;
+        if name.trim().is_empty() {
+            return;
+        }
+
+        if let (Some(db), Some(root)) = (&self.db, &self.library_root) {
+            let ops = omniscope_core::sync::FolderOps::new(root, db);
+            match ops.create_folder(name.trim(), parent_id.as_deref()) {
+                Ok(_) => {
+                    self.status_message = format!("Created folder '{name}'");
+                    self.rebuild_folder_tree();
+                    self.refresh_sidebar();
+                }
+                Err(e) => self.status_message = format!("Err: {}", e),
+            }
+        }
+    }
+
+    pub fn submit_rename_folder(&mut self, folder_id: &str, new_name: &str) {
+        self.popup = None;
+        if new_name.trim().is_empty() {
+            return;
+        }
+
+        if let (Some(db), Some(root)) = (&self.db, &self.library_root) {
+            let ops = omniscope_core::sync::FolderOps::new(root, db);
+            match ops.rename_folder(folder_id, new_name.trim()) {
+                Ok(_) => {
+                    self.status_message = format!("Renamed folder to '{new_name}'");
+                    self.rebuild_folder_tree();
+                    self.refresh_sidebar();
+
+                    // Paths of books likely changed, refresh books
+                    self.refresh_books();
+                }
+                Err(e) => self.status_message = format!("Err: {}", e),
+            }
+        }
+    }
+
+    pub fn submit_delete_folder(&mut self, folder_id: &str, keep_files: bool) {
+        self.popup = None;
+
+        if let (Some(db), Some(root)) = (&self.db, &self.library_root) {
+            let ops = omniscope_core::sync::FolderOps::new(root, db);
+
+            // Re-read name just for UI notification
+            let folder_name = self
+                .folder_tree
+                .as_ref()
+                .and_then(|t| t.nodes.get(folder_id))
+                .map(|n| n.folder.name.clone())
+                .unwrap_or_else(|| "Folder".to_string());
+
+            match ops.delete_folder(folder_id, keep_files) {
+                Ok(_) => {
+                    self.status_message = format!("Deleted {folder_name}");
+                    // Expanded ID might be gone
+                    self.expanded_folders.remove(folder_id);
+                    self.rebuild_folder_tree();
+                    self.refresh_sidebar();
+
+                    self.refresh_books();
+                }
+                Err(e) => self.status_message = format!("Err: {}", e),
+            }
+        }
+    }
+
+    pub fn submit_bulk_delete_folders(&mut self, folder_ids: &[String], keep_files: bool) {
+        self.popup = None;
+
+        if let (Some(db), Some(root)) = (&self.db, &self.library_root) {
+            let ops = omniscope_core::sync::FolderOps::new(root, db);
+
+            let mut deleted = 0;
+            let mut errors = 0;
+
+            for id in folder_ids {
+                // Keep trying even if some fail
+                match ops.delete_folder(id, keep_files) {
+                    Ok(_) => {
+                        deleted += 1;
+                        self.expanded_folders.remove(id);
+                    }
+                    Err(_) => {
+                        errors += 1;
+                    }
+                }
+            }
+
+            if errors > 0 {
+                self.status_message = format!("Bulk delete: {deleted} deleted, {errors} errors");
+            } else {
+                self.status_message = format!("Bulk deleted {deleted} folders");
+            }
+
+            self.rebuild_folder_tree();
+            self.refresh_sidebar();
+            self.refresh_books();
+        }
+    }
+
+    /// Process incoming background watcher events
+    pub fn pump_watcher_events(&mut self) {
+        let mut dirty = false;
+        let mut messages = Vec::new();
+
+        if let Some(rx) = &self.watcher_rx {
+            while let Ok(event) = rx.try_recv() {
+                dirty = true;
+                match event {
+                    omniscope_core::sync::WatcherEvent::NewBookFile { path } => {
+                        messages.push(format!("New file: {}", path.display()));
+                    }
+                    omniscope_core::sync::WatcherEvent::BookFileRemoved { path } => {
+                        messages.push(format!("File removed: {}", path.display()));
+                    }
+                    omniscope_core::sync::WatcherEvent::DirectoryCreated { path } => {
+                        messages.push(format!("Dir created: {}", path.display()));
+                    }
+                    omniscope_core::sync::WatcherEvent::DirectoryRemoved { path } => {
+                        messages.push(format!("Dir removed: {}", path.display()));
+                    }
+                    omniscope_core::sync::WatcherEvent::BookFileRenamed { from, to } => {
+                        messages.push(format!("Renamed: {} to {}", from.display(), to.display()));
+                    }
+                    omniscope_core::sync::WatcherEvent::DirectoryRenamed { from, to } => {
+                        messages.push(format!(
+                            "Dir renamed: {} to {}",
+                            from.display(),
+                            to.display()
+                        ));
+                    }
+                }
+            }
+        }
+
+        if dirty {
+            if let Some(msg) = messages.last() {
+                self.status_message = format!("Watcher: {}", msg);
+            }
+
+            // Re-sync
+            if let (Some(db), Some(lr)) = (&self.db, &self.library_root) {
+                let sync = omniscope_core::sync::FolderSync::new(lr, db);
+                if let Ok(report) = sync.full_scan() {
+                    let _ =
+                        sync.apply_sync(&report, omniscope_core::sync::SyncResolution::DiskWins);
+                }
+                self.rebuild_folder_tree();
+                self.refresh_sidebar();
+                self.refresh_books();
+            }
+        }
     }
 }

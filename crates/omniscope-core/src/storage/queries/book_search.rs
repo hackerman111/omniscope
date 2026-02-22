@@ -31,7 +31,9 @@ impl<'a> BookSearchQuery<'a> {
             read_status: ReadStatus::from_str(&status_str).unwrap_or_default(),
             tags: serde_json::from_str(&tags_str).unwrap_or_default(),
             has_file: row.get(8)?,
-            frecency_score: row.get(9)?,
+            frecency_score: row.get::<_, f64>(9)?,
+            file_presence: crate::models::FilePresence::default(),
+            path: None,
         })
     }
 

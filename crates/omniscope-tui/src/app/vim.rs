@@ -248,6 +248,10 @@ impl App {
                     let mut new_card = card.clone();
                     new_card.id = uuid::Uuid::new_v4();
                     new_card.metadata.title = format!("{} (copy)", new_card.metadata.title);
+                    
+                    // CRITICAL FIX: Strip physical file constraints to avoid SQLite UNIQUE constraint crashes
+                    new_card.file = None;
+                    new_card.file_presence = omniscope_core::models::FilePresence::NeverHadFile;
 
                     let cards_dir = self.cards_dir();
                     let _ = omniscope_core::storage::json_cards::save_card(&cards_dir, &new_card);
@@ -302,24 +306,15 @@ impl App {
 
     // ─── Phase 1: Delete Operations ────────────────────────
 
-    /// Delete specific indices (cards only).
-    pub fn delete_indices(&mut self, indices: &[usize]) {
-        if indices.is_empty() {
+    /// Delete specific books by ID.
+    pub fn delete_books_by_id(&mut self, ids: &[uuid::Uuid]) {
+        if ids.is_empty() {
             return;
         }
 
-        let mut sorted_indices = indices.to_vec();
-        sorted_indices.sort_unstable();
-        sorted_indices.dedup(); // just in case
-
-        // We delete from end to start to avoid index shifting problems?
-        // Actually best to collect IDs first.
-        let ids_to_delete: Vec<uuid::Uuid> = sorted_indices
-            .iter()
-            .filter_map(|&i| self.books.get(i).map(|b| b.id))
-            .collect();
-
-        let count = ids_to_delete.len();
+        let mut ids_to_delete = ids.to_vec();
+        ids_to_delete.sort_unstable();
+        ids_to_delete.dedup();
 
         // Save to undo stack before deleting
         let mut cards_to_delete = Vec::new();
@@ -339,18 +334,34 @@ impl App {
 
         for id in ids_to_delete {
             let cards_dir = self.cards_dir();
-
             // Delete the json card
             let _ = omniscope_core::storage::json_cards::delete_card(&cards_dir, &id);
-
-            // Remove from DB (requires String ID for now? check DB sig)
+            // Remove from DB
             if let Some(ref db) = self.db {
                 let _ = db.delete_book(&id.to_string());
             }
         }
 
-        self.search_input.clear(); // clear search to refresh list properly
+        self.status_message = format!("Deleted {} items", ids.len());
         self.refresh_books();
+    }
+
+    /// Delete specific indices (cards only) from `app.books`.
+    pub fn delete_indices(&mut self, indices: &[usize]) {
+        if indices.is_empty() {
+            return;
+        }
+
+        let ids_to_delete: Vec<uuid::Uuid> = indices
+            .iter()
+            .filter_map(|&i| self.books.get(i).map(|b| b.id))
+            .collect();
+
+        let count = ids_to_delete.len();
+
+        self.delete_books_by_id(&ids_to_delete);
+
+        self.search_input.clear(); // clear search to refresh list properly
         self.status_message = format!("Deleted {} cards", count);
 
         // Reset selection to something safe
@@ -363,7 +374,11 @@ impl App {
 
     pub fn enter_visual_mode(&mut self, mode: Mode) {
         self.mode = mode;
-        self.visual_anchor = Some(self.selected_index);
+        if self.active_panel == crate::app::ActivePanel::Sidebar {
+            self.visual_anchor = Some(self.sidebar_selected);
+        } else {
+            self.visual_anchor = Some(self.selected_index);
+        }
         self.update_visual_selection();
         self.status_message = "-- VISUAL --".to_string();
     }
@@ -377,8 +392,13 @@ impl App {
 
     pub fn update_visual_selection(&mut self) {
         if let Some(anchor) = self.visual_anchor {
-            let start = anchor.min(self.selected_index);
-            let end = anchor.max(self.selected_index);
+            let current = if self.active_panel == crate::app::ActivePanel::Sidebar {
+                self.sidebar_selected
+            } else {
+                self.selected_index
+            };
+            let start = anchor.min(current);
+            let end = anchor.max(current);
             self.visual_selections = (start..=end).collect();
             self.status_message = format!("-- VISUAL -- {} selected", self.visual_selections.len());
         }

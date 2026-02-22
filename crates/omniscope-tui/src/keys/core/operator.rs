@@ -17,7 +17,38 @@ pub enum Operator {
 /// Execute an operator on a range of book indices.
 pub fn execute_operator(app: &mut App, op: Operator, range: Vec<usize>) {
     match op {
-        Operator::Delete => app.delete_indices(&range),
+        Operator::Delete => {
+            if app.active_panel == crate::app::ActivePanel::Sidebar && app.left_panel_mode == crate::app::LeftPanelMode::FolderTree {
+                let mut folder_ids = Vec::new();
+                for &idx in &range {
+                    if let Some(crate::app::SidebarItem::FolderNode { id, .. }) = app.sidebar_items.get(idx) {
+                        folder_ids.push(id.clone());
+                    }
+                }
+                if !folder_ids.is_empty() {
+                    app.popup = Some(crate::popup::Popup::BulkDeleteFolders { folder_ids, keep_files: true });
+                }
+            } else if app.active_panel == crate::app::ActivePanel::BookList && app.center_panel_mode == crate::app::CenterPanelMode::FolderView {
+                 let mut folder_ids = Vec::new();
+                 let mut book_ids = Vec::new();
+                 for &idx in &range {
+                     if let Some(item) = app.center_items.get(idx).cloned() {
+                         match item {
+                             crate::app::CenterItem::Folder(f) => folder_ids.push(f.id.clone()),
+                             crate::app::CenterItem::Book(b) => book_ids.push(b.id),
+                         }
+                     }
+                 }
+                 if !folder_ids.is_empty() {
+                      app.popup = Some(crate::popup::Popup::BulkDeleteFolders { folder_ids, keep_files: true });
+                 }
+                 if !book_ids.is_empty() {
+                      app.delete_books_by_id(&book_ids);
+                 }
+            } else if app.active_panel == crate::app::ActivePanel::BookList {
+                app.delete_indices(&range);
+            }
+        }
         Operator::Yank => app.yank_indices(&range),
         Operator::Change => {
              // Change: open edit tags for the range (same as "change metadata")
