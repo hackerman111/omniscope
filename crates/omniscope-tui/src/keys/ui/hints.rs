@@ -214,7 +214,7 @@ pub fn get_hints(app: &App) -> Vec<KeyHint> {
                         key: "u",
                         desc: "updated (default)",
                     },
-                ]
+                ];
             }
             'g' => {
                 return vec![
@@ -236,11 +236,31 @@ pub fn get_hints(app: &App) -> Vec<KeyHint> {
                     },
                     KeyHint {
                         key: "r",
-                        desc: "root",
+                        desc: "refs/root",
+                    },
+                    KeyHint {
+                        key: "R",
+                        desc: "cited-by",
                     },
                     KeyHint {
                         key: "s",
-                        desc: "cycle status",
+                        desc: "related/status",
+                    },
+                    KeyHint {
+                        key: "d",
+                        desc: "open DOI",
+                    },
+                    KeyHint {
+                        key: "a",
+                        desc: "open arXiv",
+                    },
+                    KeyHint {
+                        key: "A",
+                        desc: "open arXiv PDF",
+                    },
+                    KeyHint {
+                        key: "o",
+                        desc: "open OA PDF",
                     },
                     KeyHint {
                         key: "t",
@@ -278,7 +298,7 @@ pub fn get_hints(app: &App) -> Vec<KeyHint> {
                         key: "B",
                         desc: "prev buffer",
                     },
-                ]
+                ];
             }
             'z' => {
                 return vec![
@@ -314,7 +334,7 @@ pub fn get_hints(app: &App) -> Vec<KeyHint> {
                         key: "M",
                         desc: "close all",
                     },
-                ]
+                ];
             }
             'm' => {
                 return vec![
@@ -326,7 +346,7 @@ pub fn get_hints(app: &App) -> Vec<KeyHint> {
                         key: "A-Z",
                         desc: "set global mark",
                     },
-                ]
+                ];
             }
             '\'' => {
                 return vec![
@@ -346,19 +366,19 @@ pub fn get_hints(app: &App) -> Vec<KeyHint> {
                         key: ">",
                         desc: "visual end",
                     },
-                ]
+                ];
             }
             '[' => {
                 return vec![KeyHint {
                     key: "[",
                     desc: "prev group",
-                }]
+                }];
             }
             ']' => {
                 return vec![KeyHint {
                     key: "]",
                     desc: "next group",
-                }]
+                }];
             }
             ' ' => {
                 return vec![
@@ -378,19 +398,19 @@ pub fn get_hints(app: &App) -> Vec<KeyHint> {
                         key: "/",
                         desc: "by first letter",
                     },
-                ]
+                ];
             }
             'f' | 'F' | 't' | 'T' => {
                 return vec![KeyHint {
                     key: "<char>",
                     desc: "jump to char",
-                }]
+                }];
             }
             'Q' => {
                 return vec![KeyHint {
                     key: "a-z",
                     desc: "register to record",
-                }]
+                }];
             }
             '@' => {
                 return vec![
@@ -402,7 +422,15 @@ pub fn get_hints(app: &App) -> Vec<KeyHint> {
                         key: "@",
                         desc: "replay last",
                     },
-                ]
+                    KeyHint {
+                        key: "e",
+                        desc: "AI enrich",
+                    },
+                    KeyHint {
+                        key: "r",
+                        desc: "AI refs",
+                    },
+                ];
             }
             _ => {}
         }

@@ -1,9 +1,14 @@
 use crate::app::{App, Mode};
 use crate::keys::core::motions;
+use crate::keys::ext::science_bindings;
 use crate::popup::Popup;
 use crossterm::event::KeyCode;
 
 pub fn handle_g_command(app: &mut App, code: KeyCode) {
+    if science_bindings::handle_g_science_command(app, code) {
+        return;
+    }
+
     match code {
         // gg — go to top
         KeyCode::Char('g') => {

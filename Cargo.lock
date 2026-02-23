@@ -1904,6 +1904,7 @@ dependencies = [
  "dirs",
  "omniscope-core",
  "omniscope-science",
+ "open",
  "ratatui",
  "regex",
  "tempfile",

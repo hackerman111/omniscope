@@ -1,5 +1,6 @@
 use super::{parse_command, CommandAction};
 use crate::app::App;
+use crate::panels::citation_graph::GraphMode;
 
 pub fn execute_command(app: &mut App, cmd: &str) {
     match parse_command(cmd) {
@@ -99,7 +100,9 @@ pub fn execute_command(app: &mut App, cmd: &str) {
             replacement,
             global,
         } => {
-            app.status_message = format!("Substitute `{pattern}` -> `{replacement}` (global: {global}) not yet fully implemented");
+            app.status_message = format!(
+                "Substitute `{pattern}` -> `{replacement}` (global: {global}) not yet fully implemented"
+            );
         }
         CommandAction::UndoList => {
             app.status_message = format!(
@@ -251,6 +254,18 @@ pub fn execute_command(app: &mut App, cmd: &str) {
             app.status_message = format!(
                 "Doctor: books={book_count}/{all_count} undo={undo_count} marks={marks_count} regs={reg_count} macros={macro_count}"
             );
+        }
+        CommandAction::Cite(style) => {
+            app.show_science_citation(style.as_deref());
+        }
+        CommandAction::Bibtex => {
+            app.show_science_bibtex();
+        }
+        CommandAction::Refs => {
+            app.open_science_references_panel();
+        }
+        CommandAction::CitedBy => {
+            app.open_science_citation_graph_panel(GraphMode::CitedBy);
         }
         CommandAction::Unknown(unknown_cmd) => {
             app.status_message = format!("Unknown command: {unknown_cmd}");

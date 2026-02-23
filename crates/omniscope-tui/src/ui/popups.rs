@@ -1,4 +1,4 @@
-use ratatui::layout::Rect;
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, List, ListItem, Paragraph};
@@ -269,6 +269,123 @@ pub(crate) fn render_popup(frame: &mut Frame, app: &App, popup: &Popup, area: Re
             overlays::registers::render(frame, app, area);
         }
 
+        Popup::ScienceReferences { panel, book_title } => {
+            let popup_area = centered_rect(94, 90, area);
+            frame.render_widget(Clear, popup_area);
+
+            let mut cloned = panel.clone();
+            cloned.render(frame, popup_area, &app.theme, book_title);
+        }
+
+        Popup::ScienceCitationGraph(panel) => {
+            let popup_area = centered_rect(94, 90, area);
+            frame.render_widget(Clear, popup_area);
+
+            let mut cloned = panel.clone();
+            cloned.render(frame, popup_area, &app.theme);
+        }
+
+        Popup::ScienceFindDownload(panel) => {
+            let popup_area = centered_rect(94, 90, area);
+            frame.render_widget(Clear, popup_area);
+
+            let mut cloned = panel.clone();
+            cloned.render(frame, popup_area, &app.theme);
+        }
+
+        Popup::TextViewer {
+            title,
+            body,
+            scroll,
+        } => {
+            let popup_area = centered_rect(82, 76, area);
+            frame.render_widget(Clear, popup_area);
+
+            let block = Block::default()
+                .title(format!(" {title} "))
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(app.theme.frost_blue()))
+                .style(Style::default().bg(app.theme.bg()));
+            let inner = block.inner(popup_area);
+            frame.render_widget(block, popup_area);
+
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .constraints([Constraint::Min(2), Constraint::Length(1)])
+                .split(inner);
+
+            let mut lines = body
+                .lines()
+                .map(|line| {
+                    Line::from(Span::styled(
+                        line.to_string(),
+                        Style::default().fg(app.theme.fg()),
+                    ))
+                })
+                .collect::<Vec<_>>();
+
+            if lines.is_empty() {
+                lines.push(Line::from(Span::styled(
+                    "(empty)",
+                    Style::default()
+                        .fg(app.theme.muted())
+                        .add_modifier(Modifier::DIM),
+                )));
+            }
+
+            let body_height = usize::from(chunks[0].height);
+            let max_scroll = lines.len().saturating_sub(body_height);
+            let start = (*scroll).min(max_scroll);
+            let visible = lines
+                .into_iter()
+                .skip(start)
+                .take(body_height)
+                .collect::<Vec<_>>();
+
+            frame.render_widget(Paragraph::new(visible), chunks[0]);
+            frame.render_widget(
+                Paragraph::new(Line::from(vec![
+                    Span::styled(
+                        "[j/k]",
+                        Style::default()
+                            .fg(app.theme.yellow())
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        " scroll  ",
+                        Style::default()
+                            .fg(app.theme.muted())
+                            .add_modifier(Modifier::DIM),
+                    ),
+                    Span::styled(
+                        "[g/G]",
+                        Style::default()
+                            .fg(app.theme.yellow())
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        " top/bottom  ",
+                        Style::default()
+                            .fg(app.theme.muted())
+                            .add_modifier(Modifier::DIM),
+                    ),
+                    Span::styled(
+                        "[Esc]",
+                        Style::default()
+                            .fg(app.theme.yellow())
+                            .add_modifier(Modifier::BOLD),
+                    ),
+                    Span::styled(
+                        " close",
+                        Style::default()
+                            .fg(app.theme.muted())
+                            .add_modifier(Modifier::DIM),
+                    ),
+                ])),
+                chunks[1],
+            );
+        }
+
         Popup::SetStatus { current, .. } => {
             let popup_area = centered_rect(45, 20, area);
             frame.render_widget(Clear, popup_area);
@@ -442,6 +559,70 @@ pub(crate) fn render_popup(frame: &mut Frame, app: &App, popup: &Popup, area: Re
                         .fg(app.theme.muted())
                         .add_modifier(Modifier::DIM),
                 )),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "  Enter: save  Esc: cancel",
+                    Style::default()
+                        .fg(app.theme.muted())
+                        .add_modifier(Modifier::DIM),
+                )),
+            ];
+            frame.render_widget(Paragraph::new(lines), inner);
+        }
+
+        Popup::EditDoi { input, .. } => {
+            let popup_area = centered_rect(62, 12, area);
+            frame.render_widget(Clear, popup_area);
+
+            let block = Block::default()
+                .title(" Edit DOI ")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(app.theme.frost_blue()))
+                .style(Style::default().bg(app.theme.bg()));
+            let inner = block.inner(popup_area);
+            frame.render_widget(block, popup_area);
+
+            let lines = vec![
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("  DOI: ", Style::default().fg(app.theme.muted())),
+                    Span::styled(
+                        format!("{input}█"),
+                        Style::default().fg(app.theme.fg_bright()),
+                    ),
+                ]),
+                Line::from(""),
+                Line::from(Span::styled(
+                    "  Enter: save  Esc: cancel",
+                    Style::default()
+                        .fg(app.theme.muted())
+                        .add_modifier(Modifier::DIM),
+                )),
+            ];
+            frame.render_widget(Paragraph::new(lines), inner);
+        }
+
+        Popup::EditArxivId { input, .. } => {
+            let popup_area = centered_rect(62, 12, area);
+            frame.render_widget(Clear, popup_area);
+
+            let block = Block::default()
+                .title(" Edit arXiv ID ")
+                .borders(Borders::ALL)
+                .border_style(Style::default().fg(app.theme.frost_blue()))
+                .style(Style::default().bg(app.theme.bg()));
+            let inner = block.inner(popup_area);
+            frame.render_widget(block, popup_area);
+
+            let lines = vec![
+                Line::from(""),
+                Line::from(vec![
+                    Span::styled("  arXiv: ", Style::default().fg(app.theme.muted())),
+                    Span::styled(
+                        format!("{input}█"),
+                        Style::default().fg(app.theme.fg_bright()),
+                    ),
+                ]),
                 Line::from(""),
                 Line::from(Span::styled(
                     "  Enter: save  Esc: cancel",

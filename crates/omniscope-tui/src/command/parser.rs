@@ -36,6 +36,10 @@ const COMMANDS: &[&str] = &[
     "undolist",
     "earlier",
     "later",
+    "cite",
+    "bibtex",
+    "refs",
+    "cited-by",
 ];
 
 pub fn get_command_suggestions(prefix: &str) -> Vec<&'static str> {
@@ -87,6 +91,10 @@ pub enum CommandAction {
     DeleteMarks(String),
     Doctor,
     Macros,
+    Cite(Option<String>),
+    Bibtex,
+    Refs,
+    CitedBy,
     Unknown(String),
 }
 
@@ -128,6 +136,11 @@ pub fn parse_command(cmd: &str) -> CommandAction {
         ["delmarks", marks] => CommandAction::DeleteMarks(marks.to_string()),
         ["doctor"] => CommandAction::Doctor,
         ["macros"] => CommandAction::Macros,
+        ["cite"] => CommandAction::Cite(None),
+        ["cite", style, ..] => CommandAction::Cite(Some(style.to_string())),
+        ["bibtex"] => CommandAction::Bibtex,
+        ["refs"] => CommandAction::Refs,
+        ["cited-by"] => CommandAction::CitedBy,
         ["tabnew", ..] => {
             // Tabs not implemented yet, but parse gracefully
             CommandAction::Unknown("tabnew (tabs not implemented)".to_string())
@@ -220,6 +233,18 @@ mod tests {
     #[test]
     fn test_macros() {
         assert_eq!(parse_command("macros"), CommandAction::Macros);
+    }
+
+    #[test]
+    fn test_science_commands() {
+        assert_eq!(parse_command("cite"), CommandAction::Cite(None));
+        assert_eq!(
+            parse_command("cite ieee"),
+            CommandAction::Cite(Some("ieee".to_string()))
+        );
+        assert_eq!(parse_command("bibtex"), CommandAction::Bibtex);
+        assert_eq!(parse_command("refs"), CommandAction::Refs);
+        assert_eq!(parse_command("cited-by"), CommandAction::CitedBy);
     }
 
     #[test]

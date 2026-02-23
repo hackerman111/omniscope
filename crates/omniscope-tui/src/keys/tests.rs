@@ -77,6 +77,48 @@ fn run_ctrl(app: &mut App, c: char) {
     crate::keys::handle_key(app, KeyCode::Char(c), KeyModifiers::CONTROL);
 }
 
+fn make_first_book_scientific(app: &mut App) {
+    let Some(first) = app.books.first() else {
+        return;
+    };
+    let cards_dir = app.cards_dir();
+    let Ok(mut card) = omniscope_core::storage::json_cards::load_card_by_id(&cards_dir, &first.id)
+    else {
+        return;
+    };
+
+    card.publication = Some(omniscope_core::models::BookPublication {
+        doc_type: omniscope_core::models::DocumentType::Article,
+        journal: Some("Journal of Tests".to_string()),
+        conference: None,
+        venue: Some("NeurIPS".to_string()),
+        volume: Some("42".to_string()),
+        issue: Some("1".to_string()),
+        pages: Some("1-10".to_string()),
+    });
+    card.identifiers = Some(omniscope_core::models::ScientificIdentifiers {
+        doi: Some("10.48550/arXiv.1706.03762".to_string()),
+        arxiv_id: Some("1706.03762v5".to_string()),
+        semantic_scholar_id: Some("204e3073870fae3d".to_string()),
+        openalex_id: Some("W2963403868".to_string()),
+        ..Default::default()
+    });
+    card.citation_graph.references = vec![
+        "DOI:10.1000/xyz123".to_string(),
+        "arXiv:2301.04567v2".to_string(),
+    ];
+    card.citation_graph.cited_by_sample = vec![
+        "DOI:10.1000/cited1".to_string(),
+        "arXiv:2201.12345".to_string(),
+    ];
+
+    let _ = omniscope_core::storage::json_cards::save_card(&cards_dir, &card);
+    if let Some(ref db) = app.db {
+        let _ = db.upsert_book(&card);
+    }
+    app.refresh_books();
+}
+
 // ═══════════════════════════════════════════════════════════
 // Existing tests (maintained)
 // ═══════════════════════════════════════════════════════════
@@ -660,5 +702,113 @@ fn test_add_tag_prompt_via_operator() {
     assert!(
         matches!(app.popup, Some(crate::popup::Popup::AddTagPrompt { .. })),
         ">ib should open AddTagPrompt popup"
+    );
+}
+
+#[test]
+fn test_gr_opens_science_references_panel_for_scientific_book() {
+    let (mut app, _temp) = create_test_app();
+    make_first_book_scientific(&mut app);
+
+    run_keys(&mut app, "gr");
+
+    assert!(
+        matches!(
+            app.popup,
+            Some(crate::popup::Popup::ScienceReferences { .. })
+        ),
+        "gr should open science references panel"
+    );
+}
+
+#[test]
+fn test_g_r_opens_science_cited_by_panel() {
+    let (mut app, _temp) = create_test_app();
+    make_first_book_scientific(&mut app);
+
+    run_keys(&mut app, "gR");
+
+    match app.popup {
+        Some(crate::popup::Popup::ScienceCitationGraph(ref panel)) => {
+            assert_eq!(
+                panel.mode,
+                crate::panels::citation_graph::GraphMode::CitedBy
+            );
+        }
+        _ => panic!("gR should open citation graph panel"),
+    }
+}
+
+#[test]
+fn test_y_d_copies_doi_to_clipboard_registers() {
+    let (mut app, _temp) = create_test_app();
+    make_first_book_scientific(&mut app);
+
+    run_keys(&mut app, "yD");
+
+    assert!(
+        app.status_message.contains("Copied DOI"),
+        "yD should copy DOI"
+    );
+    assert!(app.registers.contains_key(&'+'));
+    assert!(app.registers.contains_key(&'*'));
+}
+
+#[test]
+fn test_c_d_opens_doi_inline_edit_popup() {
+    let (mut app, _temp) = create_test_app();
+    make_first_book_scientific(&mut app);
+
+    run_keys(&mut app, "cD");
+
+    assert!(
+        matches!(app.popup, Some(crate::popup::Popup::EditDoi { .. })),
+        "cD should open DOI inline edit popup"
+    );
+}
+
+#[test]
+fn test_at_e_triggers_ai_enrich_action() {
+    let (mut app, _temp) = create_test_app();
+
+    run_keys(&mut app, "@e");
+
+    assert!(
+        app.status_message.contains("AI: enrich metadata"),
+        "@e should trigger AI enrich metadata action"
+    );
+    assert!(app.ai_panel_active);
+}
+
+#[test]
+fn test_command_cite_opens_text_viewer() {
+    let (mut app, _temp) = create_test_app();
+    make_first_book_scientific(&mut app);
+
+    app.mode = Mode::Command;
+    app.command_input = "cite ieee".to_string();
+    crate::keys::handle_key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
+
+    assert!(
+        matches!(app.popup, Some(crate::popup::Popup::TextViewer { .. })),
+        ":cite should open text viewer popup"
+    );
+}
+
+#[test]
+fn test_command_refs_opens_science_references_panel() {
+    let (mut app, _temp) = create_test_app();
+    make_first_book_scientific(&mut app);
+
+    app.mode = Mode::Command;
+    app.command_input = "refs".to_string();
+    crate::keys::handle_key(&mut app, KeyCode::Enter, KeyModifiers::NONE);
+
+    assert!(
+        matches!(
+            app.popup,
+            Some(crate::popup::Popup::ScienceReferences { .. })
+        ),
+        ":refs should open references panel"
     );
 }

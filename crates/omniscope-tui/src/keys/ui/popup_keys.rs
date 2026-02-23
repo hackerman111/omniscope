@@ -1,8 +1,17 @@
 use crate::app::App;
+use crate::panels::citation_graph::{CitationGraphPanel, CitationGraphPanelAction, GraphMode};
+use crate::panels::find_download::{
+    FindDownloadPanel, FindDownloadPanelAction, FindResult, FindSource,
+};
+use crate::panels::references::{ReferenceAddTarget, ReferencesPanelAction};
 use crate::popup::{Popup, TelescopeMode};
-use crossterm::event::{KeyCode, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 pub(crate) fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
+    if handle_science_popup_key(app, code, modifiers) {
+        return;
+    }
+
     match &mut app.popup {
         Some(Popup::AddBook(form)) => {
             // Check if we are editing the "File path" field (index 5)
@@ -654,8 +663,491 @@ pub(crate) fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModif
             _ => {}
         },
 
+        Some(_) => {}
+
         None => {}
     }
+}
+
+fn handle_science_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) -> bool {
+    let Some(current_popup) = app.popup.take() else {
+        return false;
+    };
+
+    match current_popup {
+        Popup::ScienceReferences {
+            mut panel,
+            book_title,
+        } => {
+            let mut keep_open = true;
+            let key = KeyEvent::new(code, modifiers);
+
+            match code {
+                KeyCode::Esc | KeyCode::Char('q') if modifiers == KeyModifiers::NONE => {
+                    keep_open = false;
+                }
+                _ => {
+                    if let Some(action) = panel.handle_key(key, 16) {
+                        match action {
+                            ReferencesPanelAction::OpenBook(book_id) => {
+                                if app.select_book_by_id(book_id) {
+                                    app.status_message = "Opened linked book".to_string();
+                                } else {
+                                    app.status_message =
+                                        format!("Linked book not found: {book_id}");
+                                }
+                                keep_open = false;
+                            }
+                            ReferencesPanelAction::ShowDetails { reference_index } => {
+                                if let Some(reference) = panel.references.get(reference_index) {
+                                    let details = format_reference_details(reference);
+                                    app.open_science_text_viewer(
+                                        format!(" Reference #{} ", reference.index),
+                                        details,
+                                    );
+                                    keep_open = false;
+                                }
+                            }
+                            ReferencesPanelAction::AddReference {
+                                reference_index,
+                                target,
+                            } => {
+                                let target_text = match target {
+                                    Some(ReferenceAddTarget::Doi(doi)) => format!("DOI:{doi}"),
+                                    Some(ReferenceAddTarget::Arxiv(arxiv)) => {
+                                        format!("arXiv:{arxiv}")
+                                    }
+                                    None => "manual add".to_string(),
+                                };
+                                app.status_message = format!(
+                                    "Add reference {} ({target_text})",
+                                    reference_index + 1
+                                );
+                            }
+                            ReferencesPanelAction::FindOnline { reference_index } => {
+                                let query = panel
+                                    .references
+                                    .get(reference_index)
+                                    .map(reference_query)
+                                    .unwrap_or_default();
+                                if query.trim().is_empty() {
+                                    app.status_message =
+                                        "Selected reference has no searchable text".to_string();
+                                } else {
+                                    app.open_science_find_download_panel(Some(query));
+                                    keep_open = false;
+                                }
+                            }
+                            ReferencesPanelAction::AddAllUnresolved { reference_indices } => {
+                                app.status_message = format!(
+                                    "Add unresolved references: {} item(s)",
+                                    reference_indices.len()
+                                );
+                            }
+                            ReferencesPanelAction::Export { reference_indices } => {
+                                app.status_message = format!(
+                                    "Export references: {} item(s)",
+                                    reference_indices.len()
+                                );
+                            }
+                            ReferencesPanelAction::StartSearch => {
+                                app.status_message =
+                                    "Inline search in references is not implemented yet"
+                                        .to_string();
+                            }
+                        }
+                    }
+                }
+            }
+
+            if keep_open && app.popup.is_none() {
+                app.popup = Some(Popup::ScienceReferences { panel, book_title });
+            }
+            true
+        }
+        Popup::ScienceCitationGraph(mut panel) => {
+            let mut keep_open = true;
+            let key = KeyEvent::new(code, modifiers);
+
+            match code {
+                KeyCode::Esc | KeyCode::Char('q') if modifiers == KeyModifiers::NONE => {
+                    keep_open = false;
+                }
+                _ => {
+                    if let Some(action) = panel.handle_key(key) {
+                        match action {
+                            CitationGraphPanelAction::OpenBook(book_id) => {
+                                if app.select_book_by_id(book_id) {
+                                    app.status_message = "Opened linked citation".to_string();
+                                } else {
+                                    app.status_message =
+                                        format!("Linked citation not found: {book_id}");
+                                }
+                                keep_open = false;
+                            }
+                            CitationGraphPanelAction::AddToLibrary {
+                                mode,
+                                edge_index,
+                                target,
+                            } => {
+                                let target_text = match target {
+                                    Some(
+                                        crate::panels::citation_graph::CitationAddTarget::Doi(doi),
+                                    ) => format!("DOI:{doi}"),
+                                    Some(
+                                        crate::panels::citation_graph::CitationAddTarget::Arxiv(
+                                            arxiv,
+                                        ),
+                                    ) => format!("arXiv:{arxiv}"),
+                                    None => "manual add".to_string(),
+                                };
+                                app.status_message = format!(
+                                    "Add citation {} from {} ({target_text})",
+                                    edge_index + 1,
+                                    mode.label()
+                                );
+                            }
+                            CitationGraphPanelAction::FindOnline { mode, edge_index } => {
+                                if let Some(query) = citation_query(&panel, mode, edge_index) {
+                                    app.open_science_find_download_panel(Some(query));
+                                    keep_open = false;
+                                } else {
+                                    app.status_message =
+                                        "No DOI/arXiv in selected citation".to_string();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if keep_open && app.popup.is_none() {
+                app.popup = Some(Popup::ScienceCitationGraph(panel));
+            }
+            true
+        }
+        Popup::ScienceFindDownload(mut panel) => {
+            let mut keep_open = true;
+            let key = KeyEvent::new(code, modifiers);
+
+            if let Some(action) = panel.handle_key(key) {
+                match action {
+                    FindDownloadPanelAction::Download {
+                        source,
+                        result_index,
+                    } => {
+                        app.status_message = format!(
+                            "Download from {} #{}",
+                            source_name(source),
+                            result_index + 1
+                        );
+                    }
+                    FindDownloadPanelAction::ImportMetadata {
+                        source,
+                        result_index,
+                    } => {
+                        app.status_message = format!(
+                            "Import metadata from {} #{}",
+                            source_name(source),
+                            result_index + 1
+                        );
+                    }
+                    FindDownloadPanelAction::OpenInBrowser {
+                        source,
+                        result_index,
+                    } => {
+                        if let Some(url) = find_result(&panel, source, result_index)
+                            .and_then(|item| item.open_url.as_deref())
+                        {
+                            app.open_external_url(url, "result");
+                        } else {
+                            app.status_message =
+                                format!("No URL for {} #{}", source_name(source), result_index + 1);
+                        }
+                    }
+                    FindDownloadPanelAction::Close => {
+                        keep_open = false;
+                    }
+                }
+            }
+
+            if keep_open && app.popup.is_none() {
+                app.popup = Some(Popup::ScienceFindDownload(panel));
+            }
+            true
+        }
+        Popup::EditDoi {
+            book_id,
+            mut input,
+            mut cursor,
+        } => {
+            let mut keep_open = true;
+            match code {
+                KeyCode::Esc => keep_open = false,
+                KeyCode::Enter => {
+                    app.submit_edit_science_doi(&book_id, &input);
+                    keep_open = false;
+                }
+                KeyCode::Backspace => {
+                    delete_prev_char(&mut input, &mut cursor);
+                }
+                KeyCode::Left => {
+                    cursor = prev_char_boundary(&input, cursor);
+                }
+                KeyCode::Right => {
+                    cursor = next_char_boundary(&input, cursor);
+                }
+                KeyCode::Char(c) => {
+                    if !c.is_control() {
+                        input.insert(cursor, c);
+                        cursor += c.len_utf8();
+                    }
+                }
+                _ => {}
+            }
+
+            if keep_open && app.popup.is_none() {
+                app.popup = Some(Popup::EditDoi {
+                    book_id,
+                    input,
+                    cursor,
+                });
+            }
+            true
+        }
+        Popup::EditArxivId {
+            book_id,
+            mut input,
+            mut cursor,
+        } => {
+            let mut keep_open = true;
+            match code {
+                KeyCode::Esc => keep_open = false,
+                KeyCode::Enter => {
+                    app.submit_edit_science_arxiv_id(&book_id, &input);
+                    keep_open = false;
+                }
+                KeyCode::Backspace => {
+                    delete_prev_char(&mut input, &mut cursor);
+                }
+                KeyCode::Left => {
+                    cursor = prev_char_boundary(&input, cursor);
+                }
+                KeyCode::Right => {
+                    cursor = next_char_boundary(&input, cursor);
+                }
+                KeyCode::Char(c) => {
+                    if is_valid_arxiv_char(c) {
+                        input.insert(cursor, c);
+                        cursor += c.len_utf8();
+                    }
+                }
+                _ => {}
+            }
+
+            if keep_open && app.popup.is_none() {
+                app.popup = Some(Popup::EditArxivId {
+                    book_id,
+                    input,
+                    cursor,
+                });
+            }
+            true
+        }
+        Popup::TextViewer {
+            title,
+            body,
+            mut scroll,
+        } => {
+            let mut keep_open = true;
+            let line_count = body.lines().count().max(1);
+
+            match code {
+                KeyCode::Esc | KeyCode::Char('q') if modifiers == KeyModifiers::NONE => {
+                    keep_open = false;
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    scroll = scroll.saturating_add(1).min(line_count.saturating_sub(1));
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    scroll = scroll.saturating_sub(1);
+                }
+                KeyCode::Char('d') if modifiers.contains(KeyModifiers::CONTROL) => {
+                    scroll = scroll.saturating_add(10).min(line_count.saturating_sub(1));
+                }
+                KeyCode::Char('u') if modifiers.contains(KeyModifiers::CONTROL) => {
+                    scroll = scroll.saturating_sub(10);
+                }
+                KeyCode::Char('g') => {
+                    scroll = 0;
+                }
+                KeyCode::Char('G') => {
+                    scroll = line_count.saturating_sub(1);
+                }
+                _ => {}
+            }
+
+            if keep_open && app.popup.is_none() {
+                app.popup = Some(Popup::TextViewer {
+                    title,
+                    body,
+                    scroll,
+                });
+            }
+            true
+        }
+        popup => {
+            app.popup = Some(popup);
+            false
+        }
+    }
+}
+
+fn source_name(source: FindSource) -> &'static str {
+    match source {
+        FindSource::AnnaArchive => "Anna's Archive",
+        FindSource::SciHub => "Sci-Hub",
+        FindSource::OpenAlex => "OpenAlex",
+        FindSource::SemanticGraph => "Semantic Scholar",
+    }
+}
+
+fn find_result(
+    panel: &FindDownloadPanel,
+    source: FindSource,
+    result_index: usize,
+) -> Option<&FindResult> {
+    match source {
+        FindSource::AnnaArchive => panel.anna_results.get(result_index),
+        FindSource::SciHub => panel.sci_hub_results.get(result_index),
+        FindSource::OpenAlex => panel.open_alex_results.get(result_index),
+        FindSource::SemanticGraph => panel.semantic_scholar_results.get(result_index),
+    }
+}
+
+fn citation_query(
+    panel: &CitationGraphPanel,
+    mode: GraphMode,
+    edge_index: usize,
+) -> Option<String> {
+    let edge = match mode {
+        GraphMode::References => panel.references.get(edge_index),
+        GraphMode::CitedBy => panel.cited_by.get(edge_index),
+        GraphMode::Related => panel.related.get(edge_index),
+    }?;
+
+    if let Some(doi) = &edge.doi {
+        return Some(doi.normalized.clone());
+    }
+    if let Some(arxiv_id) = &edge.arxiv_id {
+        return Some(if let Some(version) = arxiv_id.version {
+            format!("{}v{version}", arxiv_id.id)
+        } else {
+            arxiv_id.id.clone()
+        });
+    }
+    if !edge.title.trim().is_empty() {
+        return Some(edge.title.trim().to_string());
+    }
+    None
+}
+
+fn reference_query(reference: &omniscope_science::references::ExtractedReference) -> String {
+    if let Some(doi) = &reference.doi {
+        return doi.normalized.clone();
+    }
+    if let Some(arxiv_id) = &reference.arxiv_id {
+        return if let Some(version) = arxiv_id.version {
+            format!("{}v{version}", arxiv_id.id)
+        } else {
+            arxiv_id.id.clone()
+        };
+    }
+    reference.raw_text.clone()
+}
+
+fn format_reference_details(
+    reference: &omniscope_science::references::ExtractedReference,
+) -> String {
+    let mut lines = vec![
+        format!("index: {}", reference.index),
+        format!(
+            "resolution: {:?} (confidence {:.2})",
+            reference.resolution_method, reference.confidence
+        ),
+    ];
+
+    if let Some(doi) = &reference.doi {
+        lines.push(format!("doi: {}", doi.normalized));
+    }
+    if let Some(arxiv_id) = &reference.arxiv_id {
+        lines.push(format!(
+            "arxiv: {}",
+            if let Some(version) = arxiv_id.version {
+                format!("{}v{version}", arxiv_id.id)
+            } else {
+                arxiv_id.id.clone()
+            }
+        ));
+    }
+    if let Some(isbn) = &reference.isbn {
+        lines.push(format!("isbn13: {}", isbn.isbn13));
+    }
+    if let Some(title) = &reference.resolved_title {
+        lines.push(format!("title: {title}"));
+    }
+    if !reference.resolved_authors.is_empty() {
+        lines.push(format!(
+            "authors: {}",
+            reference.resolved_authors.join(", ")
+        ));
+    }
+    if let Some(year) = reference.resolved_year {
+        lines.push(format!("year: {year}"));
+    }
+    if let Some(book_id) = reference.is_in_library {
+        lines.push(format!("in_library: {book_id}"));
+    }
+
+    lines.push(String::new());
+    lines.push("raw:".to_string());
+    lines.push(reference.raw_text.clone());
+    lines.join("\n")
+}
+
+fn prev_char_boundary(input: &str, cursor: usize) -> usize {
+    if cursor == 0 {
+        return 0;
+    }
+    input[..cursor]
+        .char_indices()
+        .last()
+        .map(|(idx, _)| idx)
+        .unwrap_or(0)
+}
+
+fn next_char_boundary(input: &str, cursor: usize) -> usize {
+    if cursor >= input.len() {
+        return input.len();
+    }
+    input[cursor..]
+        .char_indices()
+        .nth(1)
+        .map(|(offset, _)| cursor + offset)
+        .unwrap_or(input.len())
+}
+
+fn delete_prev_char(input: &mut String, cursor: &mut usize) {
+    if *cursor == 0 {
+        return;
+    }
+    let prev = prev_char_boundary(input, *cursor);
+    input.remove(prev);
+    *cursor = prev;
+}
+
+fn is_valid_arxiv_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || matches!(c, '.' | '/' | '-' | ':' | 'v')
 }
 
 fn update_filepath_suggestions(form: &mut crate::popup::AddBookForm) {

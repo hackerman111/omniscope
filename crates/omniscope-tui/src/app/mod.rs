@@ -1,5 +1,6 @@
 mod books;
 mod navigation;
+mod science;
 mod sidebar;
 mod vim;
 
