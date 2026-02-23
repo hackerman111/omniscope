@@ -5,7 +5,7 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 
 use crate::app::{ActivePanel, App};
 use crate::panels::article_card;
@@ -36,7 +36,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Min(1), Constraint::Length(2)])
+        .constraints([Constraint::Min(1), Constraint::Length(5)])
         .split(inner);
 
     let body_width = usize::from(chunks[0].width.saturating_sub(1)).max(20);
@@ -70,7 +70,7 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         .collect::<Vec<_>>();
 
     frame.render_widget(Paragraph::new(visible), chunks[0]);
-    frame.render_widget(footer_lines(app, body_width, start, max_scroll), chunks[1]);
+    frame.render_widget(hints_block(app, body_width, start, max_scroll), chunks[1]);
 }
 
 fn render_default_preview(
@@ -90,7 +90,15 @@ fn render_default_preview(
         .map(|y| y.to_string())
         .unwrap_or_else(|| "—".to_string());
     let pages = card
-        .and_then(|value| value.metadata.pages)
+        .and_then(|value| {
+            value.metadata.pages.or_else(|| {
+                value
+                    .publication
+                    .as_ref()
+                    .and_then(|publication| publication.pages.as_deref())
+                    .and_then(parse_pages_from_publication)
+            })
+        })
         .map(|value| value.to_string())
         .unwrap_or_else(|| "—".to_string());
 
@@ -206,22 +214,106 @@ fn render_default_preview(
     ]
 }
 
-fn footer_lines(app: &App, width: usize, start: usize, max_scroll: usize) -> Paragraph<'static> {
+fn hints_block(app: &App, width: usize, start: usize, max_scroll: usize) -> Paragraph<'static> {
     let scroll_label = if max_scroll == 0 {
         "scroll: 1/1".to_string()
     } else {
         format!("scroll: {}/{}", start + 1, max_scroll + 1)
     };
 
-    let line_1 = format!("  [j/k] scroll  [h/l] focus  [r] refs  [c] cited-by  [f] find/download");
-    let line_2 =
-        "  [o] open pdf  [e] bibtex  [gr] refs  [gR] cited  [gs] related  [@m/@e/@r] meta/ai/refs"
-            .to_string();
-
     Paragraph::new(vec![
         Line::from(vec![
             Span::styled(
-                truncate_text(&line_1, width),
+                " Hints ",
+                Style::default()
+                    .fg(app.theme.frost_ice())
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "  Preview panel controls",
+                Style::default().fg(app.theme.muted()),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                " [j/k] ",
+                Style::default()
+                    .fg(app.theme.yellow())
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("scroll  ", Style::default().fg(app.theme.muted())),
+            Span::styled(
+                " [h/l] ",
+                Style::default()
+                    .fg(app.theme.yellow())
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("focus  ", Style::default().fg(app.theme.muted())),
+            Span::styled(
+                " [r] ",
+                Style::default()
+                    .fg(app.theme.yellow())
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("refs  ", Style::default().fg(app.theme.muted())),
+            Span::styled(
+                " [c] ",
+                Style::default()
+                    .fg(app.theme.yellow())
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("cited-by  ", Style::default().fg(app.theme.muted())),
+            Span::styled(
+                " [f] ",
+                Style::default()
+                    .fg(app.theme.yellow())
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("find/download", Style::default().fg(app.theme.muted())),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                " [o] ",
+                Style::default()
+                    .fg(app.theme.yellow())
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("open PDF  ", Style::default().fg(app.theme.muted())),
+            Span::styled(
+                " [e] ",
+                Style::default()
+                    .fg(app.theme.yellow())
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("BibTeX  ", Style::default().fg(app.theme.muted())),
+            Span::styled(
+                " [gr] ",
+                Style::default()
+                    .fg(app.theme.yellow())
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("refs  ", Style::default().fg(app.theme.muted())),
+            Span::styled(
+                " [gR] ",
+                Style::default()
+                    .fg(app.theme.yellow())
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("cited  ", Style::default().fg(app.theme.muted())),
+            Span::styled(
+                " [gs] ",
+                Style::default()
+                    .fg(app.theme.yellow())
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled("related", Style::default().fg(app.theme.muted())),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                truncate_text(
+                    " [@m] metadata  [@e] AI metadata  [@r] AI references",
+                    width.saturating_sub(16),
+                ),
                 Style::default()
                     .fg(app.theme.yellow())
                     .add_modifier(Modifier::BOLD),
@@ -234,13 +326,15 @@ fn footer_lines(app: &App, width: usize, start: usize, max_scroll: usize) -> Par
                     .add_modifier(Modifier::DIM),
             ),
         ]),
-        Line::from(Span::styled(
-            truncate_text(&line_2, width),
-            Style::default()
-                .fg(app.theme.yellow())
-                .add_modifier(Modifier::BOLD),
-        )),
     ])
+    .wrap(Wrap { trim: true })
+    .block(
+        Block::default().borders(Borders::TOP).border_style(
+            Style::default()
+                .fg(app.theme.border())
+                .add_modifier(Modifier::DIM),
+        ),
+    )
 }
 
 fn truncate_text(text: &str, max_width: usize) -> String {
@@ -254,4 +348,19 @@ fn truncate_text(text: &str, max_width: usize) -> String {
 
     let truncated: String = text.chars().take(max_width.saturating_sub(1)).collect();
     format!("{truncated}…")
+}
+
+fn parse_pages_from_publication(value: &str) -> Option<u32> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    trimmed
+        .split(|ch: char| !ch.is_ascii_digit())
+        .find_map(|part| {
+            (!part.is_empty())
+                .then(|| part.parse::<u32>().ok())
+                .flatten()
+        })
 }

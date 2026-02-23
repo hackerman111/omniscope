@@ -69,8 +69,9 @@ fn render_key_hints(frame: &mut Frame, app: &App, area: Rect) {
         return;
     }
 
-    // Compact single-row hints, positioned above status bar
-    let height = 2u16;
+    // Multi-row hint card, positioned above status bar/command line.
+    let rows = if hints.len() > 10 { 3u16 } else { 2u16 };
+    let height = rows + 1;
     let statusbar_height = 1u16;
     let cmdline_height = if app.mode == Mode::Command || app.mode == Mode::Search {
         1u16
@@ -90,6 +91,12 @@ fn render_key_hints(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(ratatui::widgets::Clear, hint_area);
 
     let block = ratatui::widgets::Block::default()
+        .title(Span::styled(
+            hint_title(app),
+            Style::default()
+                .fg(app.theme.frost_ice())
+                .add_modifier(Modifier::BOLD),
+        ))
         .borders(ratatui::widgets::Borders::TOP)
         .border_style(
             Style::default()
@@ -101,26 +108,63 @@ fn render_key_hints(frame: &mut Frame, app: &App, area: Rect) {
     let inner_area = block.inner(hint_area);
     frame.render_widget(block, hint_area);
 
-    // Render hints in compact format
-    let mut spans = Vec::new();
-    for hint in hints {
-        spans.push(Span::styled(
-            format!(" {}:", hint.key),
-            Style::default()
-                .fg(app.theme.yellow())
-                .add_modifier(Modifier::BOLD),
-        ));
-        spans.push(Span::styled(
-            format!("{}  ", hint.desc),
-            Style::default().fg(app.theme.muted()),
-        ));
+    let rows_usize = usize::from(rows);
+    let chunk = hints.len().div_ceil(rows_usize);
+    let mut lines = Vec::new();
+
+    for row_idx in 0..rows_usize {
+        let start = row_idx.saturating_mul(chunk);
+        if start >= hints.len() {
+            break;
+        }
+        let end = (start + chunk).min(hints.len());
+
+        let mut spans = Vec::new();
+        for hint in &hints[start..end] {
+            spans.push(Span::styled(
+                format!(" [{}] ", hint.key),
+                Style::default()
+                    .fg(app.theme.yellow())
+                    .add_modifier(Modifier::BOLD),
+            ));
+            spans.push(Span::styled(
+                format!("{}  ", hint.desc),
+                Style::default().fg(app.theme.muted()),
+            ));
+        }
+        lines.push(Line::from(spans));
     }
 
-    let paragraph = Paragraph::new(Line::from(spans))
+    let paragraph = Paragraph::new(lines)
         .wrap(ratatui::widgets::Wrap { trim: true })
         .style(Style::default().bg(app.theme.bg()));
 
     frame.render_widget(paragraph, inner_area);
+}
+
+fn hint_title(app: &App) -> &'static str {
+    if app.pending_register_select {
+        return " Registers ";
+    }
+    if app.pending_operator.is_some() {
+        return " Operator Pending ";
+    }
+    if let Some(pending) = app.pending_key {
+        return match pending {
+            'g' => " g-commands ",
+            'z' => " z-commands ",
+            '@' => " @-commands ",
+            'S' => " Sort ",
+            _ => " Pending ",
+        };
+    }
+    if matches!(
+        app.mode,
+        Mode::Visual | Mode::VisualLine | Mode::VisualBlock
+    ) {
+        return " Visual Mode ";
+    }
+    " Hints "
 }
 
 // Status bar is now in panels/statusbar.rs

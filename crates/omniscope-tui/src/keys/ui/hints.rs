@@ -1,4 +1,4 @@
-use crate::app::{App, Mode};
+use crate::app::{ActivePanel, App, Mode};
 use crate::keys::core::operator::Operator;
 
 pub struct KeyHint {
@@ -445,6 +445,39 @@ pub fn get_hints(app: &App) -> Vec<KeyHint> {
     }
 
     // 6. Normal mode — show basic hints
+    if app.mode == Mode::Normal && app.active_panel == ActivePanel::Preview {
+        return vec![
+            KeyHint {
+                key: "j/k",
+                desc: "scroll preview",
+            },
+            KeyHint {
+                key: "h/l",
+                desc: "focus panel",
+            },
+            KeyHint {
+                key: "r/c/f",
+                desc: "refs/cited/find",
+            },
+            KeyHint {
+                key: "o/e",
+                desc: "open pdf/bibtex",
+            },
+            KeyHint {
+                key: "gr/gR/gs",
+                desc: "refs/cited/related",
+            },
+            KeyHint {
+                key: "@m/@e/@r",
+                desc: "meta/ai/refs",
+            },
+            KeyHint {
+                key: ":help",
+                desc: "full help",
+            },
+        ];
+    }
+
     vec![
         KeyHint {
             key: "j/k",
@@ -504,11 +537,15 @@ pub fn get_hints(app: &App) -> Vec<KeyHint> {
         },
         KeyHint {
             key: "g",
-            desc: "g-commands",
+            desc: "goto commands",
         },
         KeyHint {
             key: "z",
             desc: "viewport",
+        },
+        KeyHint {
+            key: ":help",
+            desc: "full help",
         },
     ]
 }

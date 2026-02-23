@@ -944,7 +944,7 @@ fn extract_pdf_page_count(pdf_path: &Path) -> Result<Option<u32>> {
             }
         }
         Err(err) => {
-            if let Some(pages) = extract_pdf_page_count_with_pdfinfo(pdf_path) {
+            if let Some(pages) = extract_pdf_page_count_with_system_tools(pdf_path) {
                 return Ok(Some(pages));
             }
             return Err(ScienceError::PdfExtraction(format!(
@@ -954,7 +954,13 @@ fn extract_pdf_page_count(pdf_path: &Path) -> Result<Option<u32>> {
         }
     }
 
-    Ok(extract_pdf_page_count_with_pdfinfo(pdf_path))
+    Ok(extract_pdf_page_count_with_system_tools(pdf_path))
+}
+
+fn extract_pdf_page_count_with_system_tools(pdf_path: &Path) -> Option<u32> {
+    extract_pdf_page_count_with_pdfinfo(pdf_path)
+        .or_else(|| extract_pdf_page_count_with_qpdf(pdf_path))
+        .or_else(|| extract_pdf_page_count_with_mutool(pdf_path))
 }
 
 fn extract_pdf_page_count_with_pdfinfo(pdf_path: &Path) -> Option<u32> {
@@ -963,6 +969,35 @@ fn extract_pdf_page_count_with_pdfinfo(pdf_path: &Path) -> Option<u32> {
         return None;
     }
     parse_pdfinfo_pages_output(&String::from_utf8_lossy(&output.stdout))
+}
+
+fn extract_pdf_page_count_with_qpdf(pdf_path: &Path) -> Option<u32> {
+    let output = Command::new("qpdf")
+        .arg("--show-npages")
+        .arg(pdf_path)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse::<u32>()
+        .ok()
+}
+
+fn extract_pdf_page_count_with_mutool(pdf_path: &Path) -> Option<u32> {
+    let output = Command::new("mutool")
+        .arg("info")
+        .arg(pdf_path)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    parse_pdfinfo_pages_output(&stdout).or_else(|| parse_mutool_pages_output(&stdout))
 }
 
 fn extract_pdf_text_with_lopdf(pdf_path: &Path, max_pages: usize) -> Result<String> {
@@ -1148,13 +1183,13 @@ fn pick_best_title_candidate(
     let mut candidates = Vec::new();
 
     if let Some(value) = metadata_title {
-        candidates.push((score_pdf_title_candidate(&value, 0) + 8, value));
+        candidates.push((score_pdf_title_candidate(&value, 0) + 6, value));
     }
     if let Some(value) = text_title {
         candidates.push((score_pdf_title_candidate(&value, 0) + 16, value));
     }
     if let Some(value) = filename_title {
-        candidates.push((score_pdf_title_candidate(&value, 0) + 4, value));
+        candidates.push((score_pdf_title_candidate(&value, 0) + 12, value));
     }
 
     candidates
@@ -1208,14 +1243,50 @@ fn extract_title_from_filename(pdf_path: &Path, authors: &[String]) -> Option<St
         start = 1;
     }
 
-    let title = raw_tokens
-        .iter()
-        .skip(start)
-        .map(|token| token.as_str())
-        .collect::<Vec<_>>()
-        .join(" ");
+    let mut title_tokens = raw_tokens.iter().skip(start).cloned().collect::<Vec<_>>();
+    trim_trailing_filename_noise(&mut title_tokens);
+    if title_tokens.is_empty() {
+        return None;
+    }
+
+    let title = title_tokens.join(" ");
     let normalized = normalize_inline_whitespace(&title);
     is_plausible_pdf_title(&normalized).then_some(normalized)
+}
+
+fn trim_trailing_filename_noise(tokens: &mut Vec<String>) {
+    while tokens.len() > 2 {
+        let should_trim = tokens
+            .last()
+            .map(|token| trailing_filename_noise_token(token))
+            .unwrap_or(false);
+        if !should_trim {
+            break;
+        }
+        let _ = tokens.pop();
+    }
+}
+
+fn trailing_filename_noise_token(token: &str) -> bool {
+    let lowered = token.to_ascii_lowercase();
+    matches!(
+        lowered.as_str(),
+        "paper"
+            | "article"
+            | "review"
+            | "nature"
+            | "draft"
+            | "final"
+            | "preprint"
+            | "manuscript"
+            | "v1"
+            | "v2"
+            | "v3"
+            | "v4"
+            | "v5"
+            | "supplement"
+            | "supplementary"
+    )
 }
 
 fn is_plausible_pdf_title(value: &str) -> bool {
@@ -1398,6 +1469,20 @@ fn science_title_hint(token: &str) -> bool {
 }
 
 fn parse_pdfinfo_pages_output(stdout: &str) -> Option<u32> {
+    stdout.lines().find_map(|line| {
+        let trimmed = line.trim();
+        if !trimmed.to_ascii_lowercase().starts_with("pages:") {
+            return None;
+        }
+        trimmed
+            .split(':')
+            .nth(1)
+            .and_then(|value| value.split_whitespace().next())
+            .and_then(|value| value.parse::<u32>().ok())
+    })
+}
+
+fn parse_mutool_pages_output(stdout: &str) -> Option<u32> {
     stdout.lines().find_map(|line| {
         let trimmed = line.trim();
         if !trimmed.to_ascii_lowercase().starts_with("pages:") {
@@ -1905,6 +1990,15 @@ Yann LeCun1,2, Yoshua Bengio3 & Geoffrey Hinton4,5
     }
 
     #[test]
+    fn extract_title_from_filename_trims_trailing_noise_tokens() {
+        let path = Path::new("Deep_Learning_1/LeCun_Bengio_Hinton_Deep_Learning_Nature_Review.pdf");
+        assert_eq!(
+            extract_title_from_filename(path, &[]).as_deref(),
+            Some("Deep Learning")
+        );
+    }
+
+    #[test]
     fn parse_pdfinfo_output_reads_pages() {
         let output = r#"
 Title:          Example
@@ -1912,6 +2006,15 @@ Pages:          524
 Encrypted:      no
 "#;
         assert_eq!(parse_pdfinfo_pages_output(output), Some(524));
+    }
+
+    #[test]
+    fn parse_mutool_output_reads_pages() {
+        let output = r#"
+PDF-1.7
+pages: 311
+"#;
+        assert_eq!(parse_mutool_pages_output(output), Some(311));
     }
 
     #[tokio::test]

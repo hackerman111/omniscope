@@ -250,6 +250,12 @@ fn append_metrics_lines(
     let pages = card
         .metadata
         .pages
+        .or_else(|| {
+            card.publication
+                .as_ref()
+                .and_then(|publication| publication.pages.as_deref())
+                .and_then(parse_page_count_hint)
+        })
         .map(|value| format_count(value))
         .unwrap_or_else(|| "—".to_string());
 
@@ -511,6 +517,16 @@ fn format_count(value: u32) -> String {
         out.push(*ch);
     }
     out.chars().rev().collect()
+}
+
+fn parse_page_count_hint(value: &str) -> Option<u32> {
+    value
+        .split(|ch: char| !ch.is_ascii_digit())
+        .find_map(|part| {
+            (!part.is_empty())
+                .then(|| part.parse::<u32>().ok())
+                .flatten()
+        })
 }
 
 #[cfg(test)]

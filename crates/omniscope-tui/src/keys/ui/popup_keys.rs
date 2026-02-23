@@ -9,6 +9,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use omniscope_science::identifiers::extract::{
     extract_arxiv_ids_from_text, extract_dois_from_text,
 };
+use omniscope_science::identifiers::{arxiv::ArxivId, doi::Doi};
 
 pub(crate) fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
     if handle_science_popup_key(app, code, modifiers) {
@@ -719,7 +720,10 @@ fn handle_science_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifier
                                     let title = reference
                                         .resolved_title
                                         .as_deref()
-                                        .unwrap_or(reference.raw_text.as_str());
+                                        .unwrap_or(reference.raw_text.as_str())
+                                        .to_string();
+                                    let authors = reference.resolved_authors.clone();
+                                    let year = reference.resolved_year;
                                     let doi = match target.as_ref() {
                                         Some(ReferenceAddTarget::Doi(doi)) => Some(doi.as_str()),
                                         _ => reference
@@ -740,14 +744,22 @@ fn handle_science_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifier
                                         }),
                                     };
 
-                                    app.add_science_entry_to_library(
-                                        title,
-                                        &reference.resolved_authors,
-                                        reference.resolved_year,
+                                    if let Some(book_id) = app.add_science_entry_to_library(
+                                        &title,
+                                        &authors,
+                                        year,
                                         doi,
                                         arxiv_value.as_deref(),
                                         "Add reference",
-                                    );
+                                    ) {
+                                        if let Some(reference) =
+                                            panel.references.get_mut(reference_index)
+                                        {
+                                            reference.is_in_library = Some(book_id);
+                                        }
+                                    }
+                                } else {
+                                    app.status_message = "Selected reference not found".to_string();
                                 }
                             }
                             ReferencesPanelAction::FindOnline { reference_index } => {
@@ -817,6 +829,9 @@ fn handle_science_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifier
                                 target,
                             } => {
                                 if let Some(edge) = citation_edge(&panel, mode, edge_index) {
+                                    let title = edge.title.clone();
+                                    let authors = edge.authors.clone();
+                                    let year = edge.year;
                                     let doi = match target.as_ref() {
                                         Some(
                                             crate::panels::citation_graph::CitationAddTarget::Doi(
@@ -842,14 +857,22 @@ fn handle_science_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifier
                                         }),
                                     };
 
-                                    app.add_science_entry_to_library(
-                                        &edge.title,
-                                        &edge.authors,
-                                        edge.year,
+                                    if let Some(book_id) = app.add_science_entry_to_library(
+                                        &title,
+                                        &authors,
+                                        year,
                                         doi,
                                         arxiv_value.as_deref(),
                                         &format!("Add citation ({})", mode.label()),
-                                    );
+                                    ) {
+                                        if let Some(edge) =
+                                            citation_edge_mut(&mut panel, mode, edge_index)
+                                        {
+                                            edge.source_id = Some(book_id);
+                                        }
+                                    }
+                                } else {
+                                    app.status_message = "Selected citation not found".to_string();
                                 }
                             }
                             CitationGraphPanelAction::FindOnline { mode, edge_index } => {
@@ -895,11 +918,7 @@ fn handle_science_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifier
                         source,
                         result_index,
                     } => {
-                        app.status_message = format!(
-                            "Import metadata from {} #{}",
-                            source_name(source),
-                            result_index + 1
-                        );
+                        app.import_science_metadata_from_find_result(&panel, source, result_index);
                     }
                     FindDownloadPanelAction::OpenInBrowser {
                         source,
@@ -1086,6 +1105,18 @@ fn citation_edge(
     }
 }
 
+fn citation_edge_mut(
+    panel: &mut CitationGraphPanel,
+    mode: GraphMode,
+    edge_index: usize,
+) -> Option<&mut crate::panels::citation_graph::CitationEdge> {
+    match mode {
+        GraphMode::References => panel.references.get_mut(edge_index),
+        GraphMode::CitedBy => panel.cited_by.get_mut(edge_index),
+        GraphMode::Related => panel.related.get_mut(edge_index),
+    }
+}
+
 fn download_url_for_result(
     panel: &FindDownloadPanel,
     source: FindSource,
@@ -1102,22 +1133,29 @@ fn download_url_for_result(
     }
 
     if let Some(primary_id) = result.primary_id.as_deref() {
-        if let Some(doi) = extract_dois_from_text(primary_id).into_iter().next() {
+        if let Some(doi) = parse_doi_from_any(primary_id) {
             return Some(doi.url);
         }
-        if let Some(arxiv_id) = extract_arxiv_ids_from_text(primary_id).into_iter().next() {
+        if let Some(arxiv_id) = parse_arxiv_from_any(primary_id) {
             return Some(arxiv_id.pdf_url);
         }
+    }
+
+    if let Some(arxiv_id) = parse_arxiv_from_any(&result.title) {
+        return Some(arxiv_id.pdf_url);
+    }
+    if let Some(doi) = parse_doi_from_any(&result.title) {
+        return Some(doi.url);
     }
 
     let query = panel.query.trim();
     if query.is_empty() {
         return None;
     }
-    if let Some(doi) = extract_dois_from_text(query).into_iter().next() {
+    if let Some(doi) = parse_doi_from_any(query) {
         return Some(doi.url);
     }
-    if let Some(arxiv_id) = extract_arxiv_ids_from_text(query).into_iter().next() {
+    if let Some(arxiv_id) = parse_arxiv_from_any(query) {
         return Some(arxiv_id.pdf_url);
     }
 
@@ -1248,6 +1286,18 @@ fn delete_prev_char(input: &mut String, cursor: &mut usize) {
 
 fn is_valid_arxiv_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || matches!(c, '.' | '/' | '-' | ':' | 'v')
+}
+
+fn parse_doi_from_any(value: &str) -> Option<Doi> {
+    Doi::parse(value)
+        .ok()
+        .or_else(|| extract_dois_from_text(value).into_iter().next())
+}
+
+fn parse_arxiv_from_any(value: &str) -> Option<ArxivId> {
+    ArxivId::parse(value)
+        .ok()
+        .or_else(|| extract_arxiv_ids_from_text(value).into_iter().next())
 }
 
 fn update_filepath_suggestions(form: &mut crate::popup::AddBookForm) {

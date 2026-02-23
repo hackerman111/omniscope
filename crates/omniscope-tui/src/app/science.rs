@@ -1,6 +1,8 @@
 use super::{App, MetadataTaskResult, MetadataTaskState, Register, RegisterContent};
 use crate::panels::citation_graph::{CitationEdge, CitationGraphPanel, GraphMode};
-use crate::panels::find_download::{FindDownloadPanel, FindResult, SearchIdentifierKind};
+use crate::panels::find_download::{
+    FindDownloadPanel, FindResult, FindSource, SearchIdentifierKind,
+};
 use crate::panels::references::ReferencesPanel;
 use crate::popup::Popup;
 use chrono::Utc;
@@ -98,6 +100,7 @@ impl App {
 
     pub fn open_science_find_download_panel(&mut self, query: Option<String>) {
         let selected_card = self.selected_card();
+        let library_cards = json_cards::list_cards(&self.cards_dir()).unwrap_or_default();
         let inferred_query = query.or_else(|| {
             selected_card
                 .as_ref()
@@ -109,11 +112,18 @@ impl App {
         let query_text = panel.query.trim().to_string();
 
         if !query_text.is_empty() {
-            let query_doi = Doi::parse(query_text.as_str()).ok();
-            let query_arxiv = ArxivId::parse(query_text.as_str()).ok();
+            let query_doi = parse_doi_from_any(query_text.as_str());
+            let query_arxiv = parse_arxiv_from_any(query_text.as_str());
+            let query_doi_norm = query_doi.as_ref().map(|value| value.normalized.as_str());
+            let query_arxiv_norm = query_arxiv.as_ref().map(format_arxiv_for_storage);
+            let query_match = library_cards
+                .iter()
+                .find(|card| identifiers_match(card, query_doi_norm, query_arxiv_norm.as_deref()));
 
             panel.semantic_scholar_results.push(FindResult {
-                title: query_text.clone(),
+                title: query_match
+                    .map(|card| card.metadata.title.clone())
+                    .unwrap_or_else(|| query_text.clone()),
                 authors: Vec::new(),
                 year: None,
                 primary_id: query_doi
@@ -123,15 +133,17 @@ impl App {
                         query_arxiv
                             .as_ref()
                             .map(|value| format!("arXiv:{}", format_arxiv_for_storage(value)))
-                    }),
+                    })
+                    .or_else(|| query_match.and_then(preferred_identifier_text)),
                 file_format: None,
                 file_size: None,
                 citation_count: None,
-                in_library: false,
+                in_library: query_match.is_some(),
                 open_url: query_doi
                     .as_ref()
                     .map(|value| value.url.clone())
-                    .or_else(|| query_arxiv.as_ref().map(|value| value.pdf_url.clone())),
+                    .or_else(|| query_arxiv.as_ref().map(|value| value.pdf_url.clone()))
+                    .or_else(|| query_match.and_then(best_open_url)),
             });
         }
 
@@ -467,11 +479,6 @@ impl App {
             return;
         };
 
-        if card.file.is_none() {
-            self.status_message = format!("{status_prefix}: selected card has no file");
-            return;
-        }
-
         let before = card.clone();
         let (tx, rx) = mpsc::channel::<MetadataTaskResult>();
         thread::spawn(move || {
@@ -490,7 +497,7 @@ impl App {
             status_prefix: status_prefix.to_string(),
         });
         self.status_message =
-            format!("{status_prefix}: running... (large PDF files can take ~10-30s)");
+            format!("{status_prefix}: running... (file-based extraction may take 10-30s)");
     }
 
     pub fn poll_background_tasks(&mut self) {
@@ -730,7 +737,7 @@ impl App {
         doi_hint: Option<&str>,
         arxiv_hint: Option<&str>,
         source_label: &str,
-    ) {
+    ) -> Option<Uuid> {
         let doi = doi_hint
             .and_then(|value| Doi::parse(value).ok())
             .map(|value| value.normalized);
@@ -740,7 +747,7 @@ impl App {
 
         if doi.is_none() && arxiv_id.is_none() {
             self.status_message = format!("{source_label}: no DOI/arXiv on selected item");
-            return;
+            return None;
         }
 
         let cards_dir = self.cards_dir();
@@ -749,7 +756,7 @@ impl App {
             Err(err) => {
                 self.status_message =
                     format!("{source_label}: failed to read library cards: {err}");
-                return;
+                return None;
             }
         };
 
@@ -759,7 +766,7 @@ impl App {
         {
             let _ = self.select_book_by_id(existing.id);
             self.status_message = format!("{source_label}: already in library");
-            return;
+            return Some(existing.id);
         }
 
         let fallback_title = doi
@@ -786,13 +793,12 @@ impl App {
             ..Default::default()
         });
 
-        let report = EnrichmentPipeline::enrich_full_metadata_blocking(&mut card);
         let card_id = card.id;
         let saved_title = card.metadata.title.clone();
 
         if let Err(err) = json_cards::save_card(&cards_dir, &card) {
             self.status_message = format!("{source_label}: save failed: {err}");
-            return;
+            return None;
         }
         if let Some(ref db) = self.db {
             let _ = db.upsert_book(&card);
@@ -800,11 +806,142 @@ impl App {
         self.refresh_books();
         let _ = self.select_book_by_id(card_id);
 
-        self.status_message = format!(
-            "{source_label}: added \"{saved_title}\" ({} update(s), {} warning(s))",
-            report.fields_updated.len(),
-            report.errors.len()
+        self.status_message = format!("{source_label}: added \"{saved_title}\"");
+        Some(card_id)
+    }
+
+    pub fn import_science_metadata_from_find_result(
+        &mut self,
+        panel: &FindDownloadPanel,
+        source: FindSource,
+        result_index: usize,
+    ) {
+        let Some(result) = find_result_from_panel(panel, source, result_index) else {
+            self.status_message = format!(
+                "Import metadata: selected item not found ({} #{})",
+                source_name(source),
+                result_index + 1
+            );
+            return;
+        };
+
+        let Some(selected) = self.selected_book() else {
+            self.status_message = "Import metadata: no selected book".to_string();
+            return;
+        };
+
+        let cards_dir = self.cards_dir();
+        let Ok(mut card) = json_cards::load_card_by_id(&cards_dir, &selected.id) else {
+            self.status_message = "Import metadata: selected card not found".to_string();
+            return;
+        };
+
+        let before = card.clone();
+        let mut updated_fields = Vec::new();
+
+        let result_title = result.title.trim();
+        if !result_title.is_empty()
+            && should_import_result_title(&card.metadata.title, panel.query.as_str(), result_title)
+            && card.metadata.title != result_title
+        {
+            card.metadata.title = result_title.to_string();
+            updated_fields.push("title");
+        }
+
+        if card.metadata.authors.is_empty() && !result.authors.is_empty() {
+            card.metadata.authors = result.authors.clone();
+            updated_fields.push("authors");
+        }
+        if card.metadata.year.is_none() && result.year.is_some() {
+            card.metadata.year = result.year;
+            updated_fields.push("year");
+        }
+
+        let (doi_hint, arxiv_hint) =
+            identifier_hints_from_find_result(result, panel.query.as_str());
+        {
+            let identifiers = card
+                .identifiers
+                .get_or_insert_with(ScientificIdentifiers::default);
+
+            if identifiers.doi.is_none()
+                && let Some(doi) = doi_hint.as_ref()
+            {
+                identifiers.doi = Some(doi.normalized.clone());
+                updated_fields.push("doi");
+            }
+
+            if identifiers.arxiv_id.is_none()
+                && let Some(arxiv) = arxiv_hint.as_ref()
+            {
+                identifiers.arxiv_id = Some(format_arxiv_for_storage(arxiv));
+                updated_fields.push("arxiv_id");
+            }
+        }
+
+        if let Some(url) = result
+            .open_url
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            let oa = card
+                .open_access
+                .get_or_insert_with(omniscope_core::models::BookOpenAccessInfo::default);
+
+            if oa.oa_url.as_deref() != Some(url) {
+                oa.oa_url = Some(url.to_string());
+                updated_fields.push("open_access.oa_url");
+            }
+            if !oa.pdf_urls.iter().any(|existing| existing == url) {
+                oa.pdf_urls.push(url.to_string());
+                updated_fields.push("open_access.pdf_urls");
+            }
+            if !oa.is_open {
+                oa.is_open = true;
+                updated_fields.push("open_access.is_open");
+            }
+        }
+
+        if updated_fields.is_empty() {
+            self.status_message = format!(
+                "Import metadata: no new fields from {} #{}",
+                source_name(source),
+                result_index + 1
+            );
+            return;
+        }
+
+        card.touch();
+        self.push_undo(
+            format!("Import metadata: {}", card.metadata.title),
+            omniscope_core::undo::UndoAction::UpsertCards(vec![before]),
         );
+
+        if let Err(err) = json_cards::save_card(&cards_dir, &card) {
+            self.status_message = format!("Import metadata: save failed: {err}");
+            return;
+        }
+        if let Some(ref db) = self.db {
+            let _ = db.upsert_book(&card);
+        }
+
+        self.refresh_books();
+        let _ = self.select_book_by_id(card.id);
+
+        let should_background_enrich = updated_fields
+            .iter()
+            .any(|field| matches!(*field, "doi" | "arxiv_id"));
+        if should_background_enrich {
+            self.run_metadata_enrichment("Import metadata");
+        } else {
+            self.status_message = format!(
+                "Import metadata: {} field(s) updated from {} #{}",
+                updated_fields.len(),
+                source_name(source),
+                result_index + 1
+            );
+        }
     }
 
     fn selected_card(&self) -> Option<BookCard> {
@@ -935,6 +1072,92 @@ fn best_identifier_kind(card: &BookCard) -> Option<SearchIdentifierKind> {
         return Some(SearchIdentifierKind::Pmid);
     }
     None
+}
+
+fn find_result_from_panel(
+    panel: &FindDownloadPanel,
+    source: FindSource,
+    result_index: usize,
+) -> Option<&FindResult> {
+    match source {
+        FindSource::AnnaArchive => panel.anna_results.get(result_index),
+        FindSource::SciHub => panel.sci_hub_results.get(result_index),
+        FindSource::OpenAlex => panel.open_alex_results.get(result_index),
+        FindSource::SemanticGraph => panel.semantic_scholar_results.get(result_index),
+    }
+}
+
+fn source_name(source: FindSource) -> &'static str {
+    match source {
+        FindSource::AnnaArchive => "Anna's Archive",
+        FindSource::SciHub => "Sci-Hub",
+        FindSource::OpenAlex => "OpenAlex",
+        FindSource::SemanticGraph => "Semantic Scholar",
+    }
+}
+
+fn should_import_result_title(current_title: &str, query: &str, result_title: &str) -> bool {
+    let current = current_title.trim();
+    let query_trimmed = query.trim();
+    if current.is_empty() {
+        return true;
+    }
+    if is_identifier_placeholder_title(current) {
+        return true;
+    }
+    if !query_trimmed.is_empty() && current.eq_ignore_ascii_case(query_trimmed) {
+        return true;
+    }
+    !current.eq_ignore_ascii_case(result_title)
+}
+
+fn is_identifier_placeholder_title(value: &str) -> bool {
+    let lowered = value.trim().to_ascii_lowercase();
+    lowered.starts_with("doi:")
+        || lowered.starts_with("arxiv:")
+        || lowered.starts_with("arxiv ")
+        || lowered.starts_with("s2:")
+}
+
+fn identifier_hints_from_find_result(
+    result: &FindResult,
+    query: &str,
+) -> (Option<Doi>, Option<ArxivId>) {
+    let candidates = [
+        result.primary_id.as_deref().unwrap_or_default(),
+        result.open_url.as_deref().unwrap_or_default(),
+        result.title.as_str(),
+        query,
+    ];
+
+    let mut doi = None;
+    let mut arxiv = None;
+
+    for candidate in candidates {
+        if doi.is_none() {
+            doi = parse_doi_from_any(candidate);
+        }
+        if arxiv.is_none() {
+            arxiv = parse_arxiv_from_any(candidate);
+        }
+        if doi.is_some() && arxiv.is_some() {
+            break;
+        }
+    }
+
+    (doi, arxiv)
+}
+
+fn parse_doi_from_any(value: &str) -> Option<Doi> {
+    Doi::parse(value)
+        .ok()
+        .or_else(|| extract_dois_from_text(value).into_iter().next())
+}
+
+fn parse_arxiv_from_any(value: &str) -> Option<ArxivId> {
+    ArxivId::parse(value)
+        .ok()
+        .or_else(|| extract_arxiv_ids_from_text(value).into_iter().next())
 }
 
 fn build_extracted_references(card: &BookCard) -> Vec<ExtractedReference> {
