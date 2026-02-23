@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use std::str::FromStr;
 use std::sync::MutexGuard;
 use uuid::Uuid;
@@ -14,16 +14,10 @@ pub trait BookRepository: Repository<Entity = BookCard, Id = Uuid> {
     fn count(&self) -> Result<usize>;
     fn list_by_tag(&self, tag: &str, limit: usize) -> Result<Vec<BookSummaryView>>;
     fn list_by_library(&self, library: &str, limit: usize) -> Result<Vec<BookSummaryView>>;
-    fn list_by_folder_id(&self, folder_id: Option<&str>, limit: usize) -> Result<Vec<BookSummaryView>>;
     fn search_fts(&self, query: &str, limit: usize) -> Result<Vec<BookSummaryView>>;
     fn get_all_authors(&self) -> Result<Vec<String>>;
     fn update_frecency(&self, id: &Uuid, score: f64) -> Result<()>;
     fn list_all_file_paths(&self) -> Result<Vec<String>>;
-    fn find_books_by_path_prefix(&self, prefix: &str) -> Result<Vec<crate::models::BookCard>>;
-    fn add_to_virtual_folder(&self, book_id: &Uuid, folder_id: &str) -> Result<()>;
-    fn remove_from_virtual_folder(&self, book_id: &Uuid, folder_id: &str) -> Result<()>;
-    fn list_by_virtual_folder(&self, folder_id: &str, limit: usize) -> Result<Vec<BookSummaryView>>;
-    fn count_by_virtual_folder(&self, folder_id: &str) -> Result<usize>;
 }
 
 pub struct SqliteBookRepository<'a> {
@@ -49,11 +43,9 @@ impl<'a> SqliteBookRepository<'a> {
             format: format_str.and_then(|s| serde_json::from_str(&format!("\"{s}\"")).ok()),
             rating: row.get(5)?,
             read_status: ReadStatus::from_str(&status_str).unwrap_or_default(),
-            tags: serde_json::from_str(&row.get::<_, String>(7)?).unwrap_or_default(),
-            has_file: row.get::<_, bool>(8)?,
-            frecency_score: row.get::<_, f64>(9)?,
-            file_presence: crate::models::FilePresence::default(),
-            path: None,
+            tags: serde_json::from_str(&tags_str).unwrap_or_default(),
+            has_file: row.get(8)?,
+            frecency_score: row.get(9)?,
         })
     }
 }
@@ -68,7 +60,7 @@ impl<'a> Repository for SqliteBookRepository<'a> {
                 let mut stmt = self.conn.prepare(
                     "SELECT id, title, authors, year, isbn, doi, arxiv_id, file_path,
                             file_format, tags, libraries, folders, read_status, rating,
-                            summary, key_topics, updated_at, frecency_score, file_presence, folder_id
+                            summary, key_topics, updated_at, frecency_score
                      FROM books WHERE id = ?1",
                 )?;
 
@@ -80,13 +72,13 @@ impl<'a> Repository for SqliteBookRepository<'a> {
                         let folders_str: String = row.get(11)?;
                         let key_topics_str: String = row.get(15)?;
 
-                        let file_presence_str: String = row.get(18)?;
-
                         let mut card = BookCard::new(row.get::<_, String>(1)?);
                         card.id = *id;
-                        card.metadata.authors = serde_json::from_str(&authors_str).unwrap_or_default();
+                        card.metadata.authors =
+                            serde_json::from_str(&authors_str).unwrap_or_default();
                         card.metadata.year = row.get(3)?;
-                        card.metadata.isbn = row.get::<_, Option<String>>(4)?
+                        card.metadata.isbn = row
+                            .get::<_, Option<String>>(4)?
                             .map(|s| vec![s])
                             .unwrap_or_default();
                         card.identifiers = Some(crate::models::ScientificIdentifiers {
@@ -94,16 +86,18 @@ impl<'a> Repository for SqliteBookRepository<'a> {
                             arxiv_id: row.get(6)?,
                             ..Default::default()
                         });
-                        card.organization.tags = serde_json::from_str(&tags_str).unwrap_or_default();
-                        card.organization.libraries = serde_json::from_str(&libraries_str).unwrap_or_default();
-                        card.organization.folders = serde_json::from_str(&folders_str).unwrap_or_default();
-                        card.organization.read_status = ReadStatus::from_str(&row.get::<_, String>(12)?).unwrap_or_default();
+                        card.organization.tags =
+                            serde_json::from_str(&tags_str).unwrap_or_default();
+                        card.organization.libraries =
+                            serde_json::from_str(&libraries_str).unwrap_or_default();
+                        card.organization.folders =
+                            serde_json::from_str(&folders_str).unwrap_or_default();
+                        card.organization.read_status =
+                            ReadStatus::from_str(&row.get::<_, String>(12)?).unwrap_or_default();
                         card.organization.rating = row.get(13)?;
                         card.ai.summary = row.get(14)?;
-                        card.ai.key_topics = serde_json::from_str(&key_topics_str).unwrap_or_default();
-                        card.file_presence = serde_json::from_str(&file_presence_str).unwrap_or_default();
-                        card.folder_id = row.get(19)?;
-                        // Virtual folders are read from a separate query/table, we can ignore them here or fetch later
+                        card.ai.key_topics =
+                            serde_json::from_str(&key_topics_str).unwrap_or_default();
                         Ok(card)
                     })
                     .ok();
@@ -123,16 +117,17 @@ impl<'a> Repository for SqliteBookRepository<'a> {
         let key_topics_json = serde_json::to_string(&card.ai.key_topics)?;
 
         let doi = card.identifiers.as_ref().and_then(|i| i.doi.as_deref());
-        let arxiv_id = card.identifiers.as_ref().and_then(|i| i.arxiv_id.as_deref());
-        
-        let file_presence_json = serde_json::to_string(&card.file_presence)?;
+        let arxiv_id = card
+            .identifiers
+            .as_ref()
+            .and_then(|i| i.arxiv_id.as_deref());
 
         self.conn.execute(
             "INSERT OR REPLACE INTO books
                 (id, title, authors, year, isbn, doi, arxiv_id, file_path, file_format,
                  tags, libraries, folders, read_status, rating, summary,
-                 key_topics, updated_at, frecency_score, file_presence, folder_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
+                 key_topics, updated_at, frecency_score)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
             params![
                 card.id.to_string(),
                 card.metadata.title,
@@ -152,8 +147,6 @@ impl<'a> Repository for SqliteBookRepository<'a> {
                 key_topics_json,
                 card.updated_at.to_rfc3339(),
                 0.0f64,
-                file_presence_json,
-                card.folder_id
             ],
         )?;
 
@@ -167,7 +160,9 @@ impl<'a> Repository for SqliteBookRepository<'a> {
     }
 
     fn delete(&self, id: &Self::Id) -> Result<bool> {
-        let deleted = self.conn.execute("DELETE FROM books WHERE id = ?1", params![id.to_string()])?;
+        let deleted = self
+            .conn
+            .execute("DELETE FROM books WHERE id = ?1", params![id.to_string()])?;
         Ok(deleted > 0)
     }
 }
@@ -182,7 +177,9 @@ impl<'a> BookRepository for SqliteBookRepository<'a> {
 
         stmt.query_row(params![id.to_string()], Self::row_to_summary)
             .map_err(|e| match e {
-                rusqlite::Error::QueryReturnedNoRows => OmniscopeError::BookNotFound(id.to_string()),
+                rusqlite::Error::QueryReturnedNoRows => {
+                    OmniscopeError::BookNotFound(id.to_string())
+                }
                 other => OmniscopeError::Database(other),
             })
     }
@@ -202,7 +199,9 @@ impl<'a> BookRepository for SqliteBookRepository<'a> {
     }
 
     fn count(&self) -> Result<usize> {
-        let count: i64 = self.conn.query_row("SELECT COUNT(*) FROM books", [], |row| row.get(0))?;
+        let count: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM books", [], |row| row.get(0))?;
         Ok(count as usize)
     }
 
@@ -281,105 +280,12 @@ impl<'a> BookRepository for SqliteBookRepository<'a> {
     }
 
     fn list_all_file_paths(&self) -> Result<Vec<String>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT file_path FROM books WHERE file_path IS NOT NULL",
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT file_path FROM books WHERE file_path IS NOT NULL")?;
         let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
-        rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
-    }
-
-    fn find_books_by_path_prefix(&self, prefix: &str) -> Result<Vec<crate::models::BookCard>> {
-        let like_pattern = format!("{}/%", prefix);
-        let mut stmt = self.conn.prepare(
-            "SELECT file_path FROM books WHERE file_path = ?1 OR file_path LIKE ?2",
-        )?;
-        
-        // Wait, file_path in DB isn't strictly sufficient if we need the full physical path 
-        // from json_extract. Wait! The `books` table actually has `file_path` column?
-        // Let's check line 277! Yes: `SELECT file_path FROM books WHERE file_path IS NOT NULL`.
-        // I'll query IDs where file_path matches instead.
-        let mut stmt = self.conn.prepare(
-            "SELECT id FROM books WHERE file_path = ?1 OR file_path LIKE ?2",
-        )?;
-        let ids: Vec<String> = stmt.query_map(params![prefix, like_pattern], |row| row.get::<_, String>(0))?
-            .filter_map(|r| r.ok())
-            .collect();
-            
-        let mut cards = Vec::new();
-        for id in ids {
-            if let Ok(Some(card)) = self.find_by_id(&uuid::Uuid::parse_str(&id).unwrap()) {
-                cards.push(card);
-            }
-        }
-        Ok(cards)
-    }
-
-    fn list_by_folder_id(&self, folder_id: Option<&str>, limit: usize) -> Result<Vec<BookSummaryView>> {
-        let sql = if folder_id.is_some() {
-            r#"
-            SELECT id, title, authors, year, file_format, tags, rating, read_status, frecency_score, file_presence
-            FROM books
-            WHERE folder_id = ?
-            ORDER BY updated_at DESC
-            LIMIT ?
-            "#
-        } else {
-            r#"
-            SELECT id, title, authors, year, file_format, tags, rating, read_status, frecency_score, file_presence
-            FROM books
-            WHERE folder_id IS NULL
-            ORDER BY updated_at DESC
-            LIMIT ?
-            "#
-        };
-
-        let mut stmt = self.conn.prepare(sql)?;
-        let rows = if let Some(fid) = folder_id {
-            stmt.query_map(rusqlite::params![fid, limit as i64], Self::row_to_summary)?
-        } else {
-            stmt.query_map(rusqlite::params![limit as i64], Self::row_to_summary)?
-        };
-
-        rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
-    }
-
-    fn add_to_virtual_folder(&self, book_id: &Uuid, folder_id: &str) -> Result<()> {
-        self.conn.execute(
-            "INSERT OR IGNORE INTO book_virtual_folders (book_id, folder_id, added_at) VALUES (?1, ?2, ?3)",
-            params![book_id.to_string(), folder_id, chrono::Utc::now().to_rfc3339()],
-        )?;
-        Ok(())
-    }
-
-    fn remove_from_virtual_folder(&self, book_id: &Uuid, folder_id: &str) -> Result<()> {
-        self.conn.execute(
-            "DELETE FROM book_virtual_folders WHERE book_id = ?1 AND folder_id = ?2",
-            params![book_id.to_string(), folder_id],
-        )?;
-        Ok(())
-    }
-
-    fn list_by_virtual_folder(&self, folder_id: &str, limit: usize) -> Result<Vec<BookSummaryView>> {
-        let sql = r#"
-            SELECT b.id, b.title, b.authors, b.year, b.file_format, b.tags, b.rating, b.read_status, b.frecency_score, b.file_presence
-            FROM books b
-            JOIN book_virtual_folders v ON b.id = v.book_id
-            WHERE v.folder_id = ?
-            ORDER BY v.added_at DESC
-            LIMIT ?
-        "#;
-        let mut stmt = self.conn.prepare(sql)?;
-        let rows = stmt.query_map(rusqlite::params![folder_id, limit as i64], Self::row_to_summary)?;
-        rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
-    }
-
-    fn count_by_virtual_folder(&self, folder_id: &str) -> Result<usize> {
-        let count: i64 = self.conn.query_row(
-            "SELECT COUNT(*) FROM book_virtual_folders WHERE folder_id = ?1",
-            params![folder_id],
-            |row| row.get(0),
-        )?;
-        Ok(count as usize)
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
     }
 }
 
@@ -452,10 +358,6 @@ pub mod async_impl {
             unimplemented!("Use async methods with async repository")
         }
 
-        fn list_by_folder_id(&self, _folder_id: Option<&str>, _limit: usize) -> Result<Vec<BookSummaryView>> {
-            unimplemented!("Use async methods with async repository")
-        }
-
         fn search_fts(&self, _query: &str, _limit: usize) -> Result<Vec<BookSummaryView>> {
             unimplemented!("Use async methods with async repository")
         }
@@ -469,26 +371,6 @@ pub mod async_impl {
         }
 
         fn list_all_file_paths(&self) -> Result<Vec<String>> {
-            unimplemented!("Use async methods with async repository")
-        }
-
-        fn find_books_by_path_prefix(&self, _prefix: &str) -> Result<Vec<crate::models::BookCard>> {
-            unimplemented!("Use async methods with async repository")
-        }
-
-        fn add_to_virtual_folder(&self, _book_id: &Uuid, _folder_id: &str) -> Result<()> {
-            unimplemented!("Use async methods with async repository")
-        }
-
-        fn remove_from_virtual_folder(&self, _book_id: &Uuid, _folder_id: &str) -> Result<()> {
-            unimplemented!("Use async methods with async repository")
-        }
-
-        fn list_by_virtual_folder(&self, _folder_id: &str, _limit: usize) -> Result<Vec<BookSummaryView>> {
-            unimplemented!("Use async methods with async repository")
-        }
-
-        fn count_by_virtual_folder(&self, _folder_id: &str) -> Result<usize> {
             unimplemented!("Use async methods with async repository")
         }
     }

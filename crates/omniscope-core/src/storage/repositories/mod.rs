@@ -6,7 +6,7 @@ mod tag_repository;
 pub use book_repository::{BookRepository, SqliteBookRepository};
 pub use folder_repository::{FolderRepository, SqliteFolderRepository};
 pub use library_repository::{LibraryRepository, SqliteLibraryRepository};
-pub use tag_repository::{TagRepository, SqliteTagRepository};
+pub use tag_repository::{SqliteTagRepository, TagRepository};
 
 use crate::error::Result;
 

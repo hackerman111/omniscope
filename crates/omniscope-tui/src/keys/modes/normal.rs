@@ -1,14 +1,16 @@
-use crossterm::event::{KeyCode, KeyModifiers};
 use crate::app::{App, Mode, SearchDirection};
-use crate::popup::Popup;
-use crate::keys::core::operator::Operator;
 use crate::keys::core::motions;
+use crate::keys::core::operator::Operator;
+use crate::keys::ext::easy_motion;
 use crate::keys::ext::find_char;
 use crate::keys::ext::g_commands;
-use crate::keys::ext::z_commands;
-use crate::keys::ext::easy_motion;
-use crate::keys::modes::search;
+use crate::keys::ext::science_bindings;
 use crate::keys::ext::sort;
+use crate::keys::ext::z_commands;
+use crate::keys::modes::search;
+use crate::panels::citation_graph::GraphMode;
+use crate::popup::Popup;
+use crossterm::event::{KeyCode, KeyModifiers};
 
 pub(crate) fn handle_normal_mode(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
     // ── Digit accumulation (vim count prefix) ─────────────────────────
@@ -22,17 +24,26 @@ pub(crate) fn handle_normal_mode(app: &mut App, code: KeyCode, modifiers: KeyMod
             return;
         }
         if c == '0' && app.vim_count > 0 {
-             let new_count = app.vim_count.saturating_mul(10);
-             if new_count <= 9999 {
-                 app.push_vim_digit(0);
-             }
-             return;
+            let new_count = app.vim_count.saturating_mul(10);
+            if new_count <= 9999 {
+                app.push_vim_digit(0);
+            }
+            return;
         }
     }
 
     // ── Handle pending key sequences (g, z, m, ', [, ], Space, S, f/F/t/T, @) ──
     if let Some(pending) = app.pending_key {
         handle_pending_sequence(app, pending, code);
+        return;
+    }
+
+    if modifiers == KeyModifiers::NONE
+        && app.active_panel == crate::app::ActivePanel::Preview
+        && app.has_science_context()
+        && handle_preview_science_shortcut(app, code)
+    {
+        app.reset_vim_count();
         return;
     }
 
@@ -60,18 +71,20 @@ pub(crate) fn handle_normal_mode(app: &mut App, code: KeyCode, modifiers: KeyMod
 
         // ─── Ctrl+q — quickfix from visual/search ──────────────────
         KeyCode::Char('q') if modifiers.contains(KeyModifiers::CONTROL) => {
-             app.reset_vim_count();
-             if !app.visual_selections.is_empty() {
-                 app.quickfix_list = app.visual_selections.iter()
+            app.reset_vim_count();
+            if !app.visual_selections.is_empty() {
+                app.quickfix_list = app
+                    .visual_selections
+                    .iter()
                     .filter_map(|&i| app.books.get(i).cloned())
                     .collect();
-             } else {
-                 app.quickfix_list = app.books.clone();
-             }
-             app.quickfix_show = true;
-             app.quickfix_selected = 0;
-             app.exit_visual_mode();
-             app.status_message = format!("Sent {} items to quickfix", app.quickfix_list.len());
+            } else {
+                app.quickfix_list = app.books.clone();
+            }
+            app.quickfix_show = true;
+            app.quickfix_selected = 0;
+            app.exit_visual_mode();
+            app.status_message = format!("Sent {} items to quickfix", app.quickfix_list.len());
         }
 
         // ─── Visual Mode Entry ─────────────────────────────────────
@@ -103,22 +116,6 @@ pub(crate) fn handle_normal_mode(app: &mut App, code: KeyCode, modifiers: KeyMod
             app.search_direction = SearchDirection::Backward;
         }
 
-        // ─── Virtual Folders ────────────────────────────────────────
-        KeyCode::Char('+') => {
-            app.reset_vim_count();
-            if app.selected_book().is_some() {
-                if let Some(ref db) = app.db {
-                    if let Ok(folders) = db.list_virtual_folders() {
-                        app.popup = Some(Popup::AddToVirtualFolder {
-                            book_idx: app.selected_index,
-                            selected_folder_idx: 0,
-                            folders,
-                        });
-                    }
-                }
-            }
-        }
-
         // ─── Search Next/Prev ───────────────────────────────────────
         KeyCode::Char('n') => {
             search::search_next(app, false);
@@ -131,7 +128,9 @@ pub(crate) fn handle_normal_mode(app: &mut App, code: KeyCode, modifiers: KeyMod
         KeyCode::Char('*') => {
             // Search for current book's author (forward)
             if let Some(book) = app.selected_book() {
-                let query = book.authors.first()
+                let query = book
+                    .authors
+                    .first()
                     .cloned()
                     .unwrap_or_else(|| book.title.clone());
                 app.last_search = Some(query.clone());
@@ -142,7 +141,9 @@ pub(crate) fn handle_normal_mode(app: &mut App, code: KeyCode, modifiers: KeyMod
         KeyCode::Char('#') => {
             // Search for current book's author (backward)
             if let Some(book) = app.selected_book() {
-                let query = book.authors.first()
+                let query = book
+                    .authors
+                    .first()
                     .cloned()
                     .unwrap_or_else(|| book.title.clone());
                 app.last_search = Some(query.clone());
@@ -156,45 +157,35 @@ pub(crate) fn handle_normal_mode(app: &mut App, code: KeyCode, modifiers: KeyMod
             let n = app.count_or_one();
             app.reset_vim_count();
             if app.active_panel == crate::app::ActivePanel::Sidebar {
-                 app.move_down_n(n);
+                app.move_down_n(n);
+            } else if app.active_panel == crate::app::ActivePanel::Preview {
+                app.preview_scroll_down(n);
             } else {
-                 if let Some(target) = motions::get_nav_target(app, 'j', n) {
-                     app.selected_index = target;
-                 }
+                if let Some(target) = motions::get_nav_target(app, 'j', n) {
+                    app.selected_index = target;
+                }
             }
         }
         KeyCode::Char('k') | KeyCode::Up => {
             let n = app.count_or_one();
             app.reset_vim_count();
             if app.active_panel == crate::app::ActivePanel::Sidebar {
-                 app.move_up_n(n);
+                app.move_up_n(n);
+            } else if app.active_panel == crate::app::ActivePanel::Preview {
+                app.preview_scroll_up(n);
             } else {
-                 if let Some(target) = motions::get_nav_target(app, 'k', n) {
-                     app.selected_index = target;
-                 }
+                if let Some(target) = motions::get_nav_target(app, 'k', n) {
+                    app.selected_index = target;
+                }
             }
         }
-        KeyCode::Char('h') | KeyCode::Left  => { 
-            app.reset_vim_count(); 
-            if app.active_panel == crate::app::ActivePanel::Sidebar {
-                if let Some(crate::app::SidebarItem::FolderNode { is_expanded: true, .. }) = app.sidebar_items.get(app.sidebar_selected) {
-                    app.toggle_folder_expansion();
-                }
-            } else {
-                app.focus_left(); 
-            }
+        KeyCode::Char('h') | KeyCode::Left => {
+            app.reset_vim_count();
+            app.focus_left();
         }
-        KeyCode::Char('l') | KeyCode::Right => { 
-            app.reset_vim_count(); 
-            if app.active_panel == crate::app::ActivePanel::Sidebar {
-                if let Some(crate::app::SidebarItem::FolderNode { is_expanded: false, .. }) = app.sidebar_items.get(app.sidebar_selected) {
-                    app.toggle_folder_expansion();
-                } else {
-                    app.focus_right(); 
-                }
-            } else {
-                app.focus_right(); 
-            }
+        KeyCode::Char('l') | KeyCode::Right => {
+            app.reset_vim_count();
+            app.focus_right();
         }
 
         // ─── Complex Motions (G, gg, 0, $) ──────────────────────────
@@ -203,9 +194,13 @@ pub(crate) fn handle_normal_mode(app: &mut App, code: KeyCode, modifiers: KeyMod
             if app.active_panel == crate::app::ActivePanel::Sidebar {
                 app.move_to_bottom();
             } else {
-                let count = if app.has_explicit_count { app.vim_count as usize } else { 0 };
+                let count = if app.has_explicit_count {
+                    app.vim_count as usize
+                } else {
+                    0
+                };
                 if let Some(t) = motions::get_nav_target(app, 'G', count) {
-                     app.selected_index = t;
+                    app.selected_index = t;
                 }
             }
             app.reset_vim_count();
@@ -223,7 +218,7 @@ pub(crate) fn handle_normal_mode(app: &mut App, code: KeyCode, modifiers: KeyMod
             if app.active_panel == crate::app::ActivePanel::Sidebar {
                 app.move_to_bottom();
             } else if let Some(t) = motions::get_nav_target(app, '$', 1) {
-                 app.selected_index = t;
+                app.selected_index = t;
             }
         }
 
@@ -251,18 +246,18 @@ pub(crate) fn handle_normal_mode(app: &mut App, code: KeyCode, modifiers: KeyMod
 
         // ─── Hierarchy ──────────────────────────────────────────────
         KeyCode::Char('-') | KeyCode::Backspace => {
-             app.reset_vim_count();
-             app.go_up();
+            app.reset_vim_count();
+            app.go_up();
         }
 
         // ─── Group Navigation ──────────────────────────────────────
         KeyCode::Char('{') => {
-             app.reset_vim_count();
-             app.move_prev_group();
+            app.reset_vim_count();
+            app.move_prev_group();
         }
         KeyCode::Char('}') => {
-             app.reset_vim_count();
-             app.move_next_group();
+            app.reset_vim_count();
+            app.move_next_group();
         }
 
         // ─── Jump List ──────────────────────────────────────────────
@@ -276,19 +271,26 @@ pub(crate) fn handle_normal_mode(app: &mut App, code: KeyCode, modifiers: KeyMod
         }
 
         // ─── Pending leaders ────────────────────────────────────────
-        KeyCode::Char('g') => { app.pending_key = Some('g'); }
-        KeyCode::Char('z') => { app.pending_key = Some('z'); }
-        KeyCode::Char('m') => { app.pending_key = Some('m'); }
-        KeyCode::Char('\'') => { app.pending_key = Some('\''); }
-        KeyCode::Char('[') => { app.pending_key = Some('['); }
-        KeyCode::Char(']') => { app.pending_key = Some(']'); }
-        KeyCode::Char(' ') => { 
-            app.reset_vim_count();
-            if app.active_panel == crate::app::ActivePanel::Sidebar {
-                app.toggle_folder_expansion();
-            } else {
-                app.pending_key = Some(' ');
-            }
+        KeyCode::Char('g') => {
+            app.pending_key = Some('g');
+        }
+        KeyCode::Char('z') => {
+            app.pending_key = Some('z');
+        }
+        KeyCode::Char('m') => {
+            app.pending_key = Some('m');
+        }
+        KeyCode::Char('\'') => {
+            app.pending_key = Some('\'');
+        }
+        KeyCode::Char('[') => {
+            app.pending_key = Some('[');
+        }
+        KeyCode::Char(']') => {
+            app.pending_key = Some(']');
+        }
+        KeyCode::Char(' ') => {
+            app.pending_key = Some(' ');
         }
 
         // ─── Scroll (Ctrl variants MUST precede plain char matches) ──
@@ -329,43 +331,34 @@ pub(crate) fn handle_normal_mode(app: &mut App, code: KeyCode, modifiers: KeyMod
 
         // ─── Operators ──────────────────────────────────────────────
         KeyCode::Char('d') if !modifiers.contains(KeyModifiers::CONTROL) => {
-             app.reset_vim_count();
-             if app.active_panel == crate::app::ActivePanel::Sidebar {
-                 if let Some(crate::app::SidebarItem::FolderNode { id, name, .. }) = app.sidebar_items.get(app.sidebar_selected) {
-                     app.popup = Some(Popup::ConfirmDeleteFolder {
-                         folder_id: id.to_string(),
-                         folder_name: name.to_string(),
-                         keep_files: true,
-                     });
-                 }
-             } else {
-                 app.pending_operator = Some(Operator::Delete);
-                 app.mode = Mode::Pending;
-             }
+            app.pending_operator = Some(Operator::Delete);
+            app.mode = Mode::Pending;
         }
         KeyCode::Char('y') if !modifiers.contains(KeyModifiers::CONTROL) => {
-             app.pending_operator = Some(Operator::Yank);
-             app.mode = Mode::Pending;
+            app.pending_operator = Some(Operator::Yank);
+            app.mode = Mode::Pending;
         }
         KeyCode::Char('c') => {
-             app.pending_operator = Some(Operator::Change);
-             app.mode = Mode::Pending;
+            app.pending_operator = Some(Operator::Change);
+            app.mode = Mode::Pending;
         }
         KeyCode::Char('>') => {
-             app.pending_operator = Some(Operator::AddTag);
-             app.mode = Mode::Pending;
+            app.pending_operator = Some(Operator::AddTag);
+            app.mode = Mode::Pending;
         }
         KeyCode::Char('<') => {
-             app.pending_operator = Some(Operator::RemoveTag);
-             app.mode = Mode::Pending;
+            app.pending_operator = Some(Operator::RemoveTag);
+            app.mode = Mode::Pending;
         }
-        
+
         KeyCode::Char('p') => {
-             app.reset_vim_count();
-             app.paste_from_register();
+            app.reset_vim_count();
+            app.paste_from_register();
         }
-        
-        KeyCode::Char('"') => { app.pending_register_select = true; }
+
+        KeyCode::Char('"') => {
+            app.pending_register_select = true;
+        }
 
         // ─── Undo / Redo ────────────────────────────────────────────
         KeyCode::Char('u') if !modifiers.contains(KeyModifiers::CONTROL) => {
@@ -381,96 +374,71 @@ pub(crate) fn handle_normal_mode(app: &mut App, code: KeyCode, modifiers: KeyMod
         KeyCode::Char('f') | KeyCode::Char('F') | KeyCode::Char('t') | KeyCode::Char('T')
             if !modifiers.contains(KeyModifiers::CONTROL) =>
         {
-             if let KeyCode::Char(c) = code {
-                  app.pending_key = Some(c);
-             }
+            if let KeyCode::Char(c) = code {
+                app.pending_key = Some(c);
+            }
         }
         KeyCode::Char(';') => {
-             if let Some((target_char, motion)) = app.last_find_char {
-                  let n = app.count_or_one();
-                  app.reset_vim_count();
-                  if let Some(target) = find_char::get_find_char_target(app, motion, target_char, n) {
-                      app.selected_index = target;
-                  }
-             }
+            if let Some((target_char, motion)) = app.last_find_char {
+                let n = app.count_or_one();
+                app.reset_vim_count();
+                if let Some(target) = find_char::get_find_char_target(app, motion, target_char, n) {
+                    app.selected_index = target;
+                }
+            }
         }
         KeyCode::Char(',') => {
-             if let Some((target_char, motion)) = app.last_find_char {
-                  let opp_motion = match motion {
-                      'f' => 'F', 'F' => 'f', 't' => 'T', 'T' => 't', _ => motion
-                  };
-                  let n = app.count_or_one();
-                  app.reset_vim_count();
-                  if let Some(target) = find_char::get_find_char_target(app, opp_motion, target_char, n) {
-                      app.selected_index = target;
-                  }
-             }
+            if let Some((target_char, motion)) = app.last_find_char {
+                let opp_motion = match motion {
+                    'f' => 'F',
+                    'F' => 'f',
+                    't' => 'T',
+                    'T' => 't',
+                    _ => motion,
+                };
+                let n = app.count_or_one();
+                app.reset_vim_count();
+                if let Some(target) =
+                    find_char::get_find_char_target(app, opp_motion, target_char, n)
+                {
+                    app.selected_index = target;
+                }
+            }
         }
 
         // ─── Book Operations ────────────────────────────────────────
         KeyCode::Char('a') if !modifiers.contains(KeyModifiers::CONTROL) => {
             app.reset_vim_count();
-            if app.active_panel == crate::app::ActivePanel::Sidebar {
-                if let Some(crate::app::SidebarItem::FolderNode { id, .. }) = app.sidebar_items.get(app.sidebar_selected) {
-                    app.popup = Some(Popup::CreateFolder { parent_id: Some(id.to_string()), input: String::new(), cursor: 0 });
-                } else {
-                    app.popup = Some(Popup::CreateFolder { parent_id: None, input: String::new(), cursor: 0 });
-                }
-            } else {
-                app.open_add_popup();
-            }
-        }
-        KeyCode::Char('A') if !modifiers.contains(KeyModifiers::CONTROL) => {
-            app.reset_vim_count();
-            if app.active_panel == crate::app::ActivePanel::Sidebar {
-                app.popup = Some(Popup::CreateFolder { parent_id: None, input: String::new(), cursor: 0 });
-            }
-        }
-        KeyCode::Char('r') if !modifiers.contains(KeyModifiers::CONTROL) => {
-            app.reset_vim_count();
-            if app.active_panel == crate::app::ActivePanel::Sidebar {
-                if let Some(crate::app::SidebarItem::FolderNode { id, name, .. }) = app.sidebar_items.get(app.sidebar_selected) {
-                    app.popup = Some(Popup::RenameFolder {
-                        folder_id: id.to_string(),
-                        old_name: name.to_string(),
-                        input: name.to_string(),
-                        cursor: name.chars().count(),
-                    });
-                }
-            }
+            app.open_add_popup();
         }
         KeyCode::Char('o') if !modifiers.contains(KeyModifiers::CONTROL) => {
-            app.reset_vim_count(); app.open_selected_book();
+            app.reset_vim_count();
+            app.open_selected_book();
         }
         KeyCode::Char('R') => {
             app.reset_vim_count();
             app.popup = Some(Popup::SetRating {
-                id: app.selected_book().map(|b| b.id.to_string()).unwrap_or_default(),
+                id: app
+                    .selected_book()
+                    .map(|b| b.id.to_string())
+                    .unwrap_or_default(),
                 current: app.selected_book().and_then(|b| b.rating),
             });
         }
-        KeyCode::Char('E') => {
+        KeyCode::Char('s') => {
             app.reset_vim_count();
-            if let Some(book) = app.selected_book() {
-                app.popup = Some(Popup::AttachGhostFile {
-                    book_id: book.id.to_string(),
-                    input: String::new(),
-                    cursor: 0,
-                    autocomplete: crate::popup::AutocompleteState::new(),
-                });
-            }
+            app.cycle_status();
         }
-        KeyCode::Char('s') => { app.reset_vim_count(); app.cycle_status(); }
-        KeyCode::Char('S') => { 
-            app.reset_vim_count(); 
-            app.pending_key = Some('S'); 
+        KeyCode::Char('S') => {
+            app.reset_vim_count();
+            app.pending_key = Some('S');
         }
 
         // ─── Modes & Search ─────────────────────────────────────────
         KeyCode::Char('i') if !modifiers.contains(KeyModifiers::CONTROL) => {
-             app.reset_vim_count();
-             app.open_add_popup();
-             app.status_message = "-- INSERT --".to_string();
+            app.reset_vim_count();
+            app.open_add_popup();
+            app.status_message = "-- INSERT --".to_string();
         }
         KeyCode::Char(':') => {
             app.reset_vim_count();
@@ -480,26 +448,26 @@ pub(crate) fn handle_normal_mode(app: &mut App, code: KeyCode, modifiers: KeyMod
         }
 
         // ─── Misc ───────────────────────────────────────────────────
-        KeyCode::Char('T') => {
-            app.reset_vim_count();
-            if app.active_panel == crate::app::ActivePanel::BookList && app.center_panel_mode == crate::app::CenterPanelMode::FolderView {
-                app.folder_view_sort = app.folder_view_sort.next();
-                app.refresh_center_panel();
-                app.status_message = format!("Sort: {:?}", app.folder_view_sort);
-            }
-        }
         KeyCode::Enter => {
             app.reset_vim_count();
             match app.active_panel {
                 crate::app::ActivePanel::Sidebar => app.select_sidebar_item(),
-                crate::app::ActivePanel::BookList => app.open_selected_center_item(),
+                crate::app::ActivePanel::BookList => app.open_selected_book(),
                 _ => {}
             }
         }
-        KeyCode::Tab    => { app.reset_vim_count(); app.focus_right(); }
-        KeyCode::BackTab => { app.reset_vim_count(); app.focus_left(); }
+        KeyCode::Tab => {
+            app.reset_vim_count();
+            app.focus_right();
+        }
+        KeyCode::BackTab => {
+            app.reset_vim_count();
+            app.focus_left();
+        }
 
-        _ => { app.reset_vim_count(); }
+        _ => {
+            app.reset_vim_count();
+        }
     }
 }
 
@@ -539,7 +507,7 @@ fn handle_pending_sequence(app: &mut App, pending: char, code: KeyCode) {
                 }
             }
         }
-        // '> — jump to end of last visual selection  
+        // '> — jump to end of last visual selection
         ('\'', KeyCode::Char('>')) => {
             if let Some((_, end)) = app.last_visual_range {
                 if end < app.books.len() {
@@ -576,25 +544,33 @@ fn handle_pending_sequence(app: &mut App, pending: char, code: KeyCode) {
         ('Q', _) => {
             app.status_message = "Invalid register for macro (use a-z)".to_string();
         }
-        // @<char> - replay macro
-        ('@', KeyCode::Char('@')) => {
-            // @@ — replay last macro
-            if let Some(last) = app.macro_recorder.last_played {
+        // @<char> - science actions or macro replay
+        ('@', KeyCode::Char(c)) => {
+            if c == '@' {
+                if let Some(last) = app.macro_recorder.last_played {
+                    let count = app.count_or_one();
+                    app.reset_vim_count();
+                    replay_macro(app, last, count);
+                } else {
+                    app.status_message = "No last macro to replay".to_string();
+                }
+                return;
+            }
+
+            if science_bindings::handle_at_science_command(app, c) {
+                app.reset_vim_count();
+                return;
+            }
+
+            if c.is_ascii_lowercase() {
                 let count = app.count_or_one();
                 app.reset_vim_count();
-                replay_macro(app, last, count);
+                replay_macro(app, c, count);
             } else {
-                app.status_message = "No last macro to replay".to_string();
+                app.status_message = "Invalid register for macro replay".to_string();
             }
         }
-        ('@', KeyCode::Char(c)) if c.is_ascii_lowercase() => {
-            let count = app.count_or_one();
-            app.reset_vim_count();
-            replay_macro(app, c, count);
-        }
-        ('@', _) => {
-            app.status_message = "Invalid register for macro replay".to_string();
-        }
+        ('@', _) => app.status_message = "Invalid register for macro replay".to_string(),
         _ => {}
     }
 }
@@ -611,5 +587,31 @@ fn replay_macro(app: &mut App, reg: char, count: usize) {
         app.status_message = format!("Replayed @{reg} ×{count}");
     } else {
         app.status_message = format!("Macro @{reg} is empty");
+    }
+}
+
+fn handle_preview_science_shortcut(app: &mut App, code: KeyCode) -> bool {
+    match code {
+        KeyCode::Char('r') => {
+            app.open_science_references_panel();
+            true
+        }
+        KeyCode::Char('c') => {
+            app.open_science_citation_graph_panel(GraphMode::CitedBy);
+            true
+        }
+        KeyCode::Char('o') => {
+            app.find_science_open_pdf();
+            true
+        }
+        KeyCode::Char('f') => {
+            app.open_science_find_download_panel(None);
+            true
+        }
+        KeyCode::Char('e') => {
+            app.show_science_bibtex();
+            true
+        }
+        _ => false,
     }
 }

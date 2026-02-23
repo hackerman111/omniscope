@@ -1,5 +1,9 @@
 use omniscope_core::{BookSummaryView, ReadStatus};
 
+use crate::panels::citation_graph::CitationGraphPanel;
+use crate::panels::find_download::FindDownloadPanel;
+use crate::panels::references::ReferencesPanel;
+
 /// Popup dialog types.
 #[derive(Debug)]
 pub enum Popup {
@@ -17,8 +21,6 @@ pub enum Popup {
     Telescope(TelescopeState),
     /// Help screen.
     Help,
-<<<<<<< gemini
-=======
     /// EasyMotion overlay.
     EasyMotion(EasyMotionState),
     /// Selection of marks.
@@ -26,30 +28,56 @@ pub enum Popup {
     /// Selection of registers.
     Registers,
     /// Quick edit: year.
-    EditYear { book_id: String, input: String, cursor: usize },
+    EditYear {
+        book_id: String,
+        input: String,
+        cursor: usize,
+    },
     /// Quick edit: authors (comma-separated).
-    EditAuthors { book_id: String, input: String, cursor: usize },
+    EditAuthors {
+        book_id: String,
+        input: String,
+        cursor: usize,
+    },
     /// Prompt input for adding a tag to a range of books.
-    AddTagPrompt { indices: Vec<usize>, input: String, cursor: usize },
+    AddTagPrompt {
+        indices: Vec<usize>,
+        input: String,
+        cursor: usize,
+    },
     /// Prompt input for removing a tag from a range of books.
-    RemoveTagPrompt { indices: Vec<usize>, available_tags: Vec<String>, selected: usize },
-    /// Create a new folder.
-    CreateFolder { parent_id: Option<String>, input: String, cursor: usize },
-    /// Rename an existing folder.
-    RenameFolder { folder_id: String, old_name: String, input: String, cursor: usize },
-    /// Confirm deletion of a folder.
-    ConfirmDeleteFolder { folder_id: String, folder_name: String, keep_files: bool },
-    /// Confirm bulk deletion of folders.
-    BulkDeleteFolders { folder_ids: Vec<String>, keep_files: bool },
-    /// Attach a file to a ghost book.
-    AttachGhostFile { book_id: String, input: String, cursor: usize, autocomplete: AutocompleteState },
-    /// Prompt showing how to find/download a placeholder for a ghost file.
-    FindGhostFilePlaceholder { book_id: String },
-    /// Create a new virtual folder.
-    CreateVirtualFolder { input: String, cursor: usize },
-    /// Add a book to a virtual folder.
-    AddToVirtualFolder { book_idx: usize, selected_folder_idx: usize, folders: Vec<omniscope_core::models::Folder> },
->>>>>>> local
+    RemoveTagPrompt {
+        indices: Vec<usize>,
+        available_tags: Vec<String>,
+        selected: usize,
+    },
+    /// Scientific references panel.
+    ScienceReferences {
+        panel: ReferencesPanel,
+        book_title: String,
+    },
+    /// Scientific citation graph panel.
+    ScienceCitationGraph(CitationGraphPanel),
+    /// Scientific find/download panel.
+    ScienceFindDownload(FindDownloadPanel),
+    /// Inline DOI edit popup.
+    EditDoi {
+        book_id: String,
+        input: String,
+        cursor: usize,
+    },
+    /// Inline arXiv edit popup.
+    EditArxivId {
+        book_id: String,
+        input: String,
+        cursor: usize,
+    },
+    /// Scrollable text viewer (citation, BibTeX, details).
+    TextViewer {
+        title: String,
+        body: String,
+        scroll: usize,
+    },
 }
 
 /// Telescope internal mode (vim-like).
@@ -96,7 +124,9 @@ impl AutocompleteState {
     /// Refilter `visible` based on current prefix.
     pub fn filter(&mut self, prefix: &str) {
         let prefix_lower = prefix.to_lowercase();
-        self.visible = self.all_candidates.iter()
+        self.visible = self
+            .all_candidates
+            .iter()
             .filter(|c| c.to_lowercase().contains(&prefix_lower))
             .cloned()
             .take(8)
@@ -134,7 +164,9 @@ impl AutocompleteState {
 
     /// Return currently highlighted candidate (if any).
     pub fn current(&self) -> Option<&str> {
-        self.selected.and_then(|i| self.visible.get(i)).map(|s| s.as_str())
+        self.selected
+            .and_then(|i| self.visible.get(i))
+            .map(|s| s.as_str())
     }
 
     pub fn clear(&mut self) {
@@ -274,8 +306,7 @@ impl TelescopeState {
     pub fn delete_word_back(&mut self) {
         // Delete back to previous whitespace
         while self.cursor > 0 {
-            let prev_char = self.query[..self.cursor]
-                .chars().last().unwrap_or(' ');
+            let prev_char = self.query[..self.cursor].chars().last().unwrap_or(' ');
             self.delete_back();
             if prev_char == ' ' {
                 break;
@@ -286,14 +317,19 @@ impl TelescopeState {
     pub fn cursor_left(&mut self) {
         if self.cursor > 0 {
             self.cursor = self.query[..self.cursor]
-                .char_indices().last().map(|(i, _)| i).unwrap_or(0);
+                .char_indices()
+                .last()
+                .map(|(i, _)| i)
+                .unwrap_or(0);
         }
     }
 
     pub fn cursor_right(&mut self) {
         if self.cursor < self.query.len() {
             self.cursor = self.query[self.cursor..]
-                .char_indices().nth(1).map(|(i, _)| self.cursor + i)
+                .char_indices()
+                .nth(1)
+                .map(|(i, _)| self.cursor + i)
                 .unwrap_or(self.query.len());
         }
     }
@@ -301,39 +337,66 @@ impl TelescopeState {
     pub fn cursor_word_forward(&mut self) {
         // Skip spaces, then skip word
         let s = &self.query[self.cursor..];
-        let skip_space: usize = s.chars().take_while(|c| *c == ' ').map(|c| c.len_utf8()).sum();
+        let skip_space: usize = s
+            .chars()
+            .take_while(|c| *c == ' ')
+            .map(|c| c.len_utf8())
+            .sum();
         let after_space = self.cursor + skip_space;
-        let word_end: usize = self.query[after_space..].chars()
-            .take_while(|c| *c != ' ').map(|c| c.len_utf8()).sum();
+        let word_end: usize = self.query[after_space..]
+            .chars()
+            .take_while(|c| *c != ' ')
+            .map(|c| c.len_utf8())
+            .sum();
         self.cursor = (after_space + word_end).min(self.query.len());
     }
 
     pub fn cursor_word_back(&mut self) {
-        if self.cursor == 0 { return; }
+        if self.cursor == 0 {
+            return;
+        }
         let before = &self.query[..self.cursor];
-        let skip_space: usize = before.chars().rev().take_while(|c| *c == ' ').map(|c| c.len_utf8()).sum();
+        let skip_space: usize = before
+            .chars()
+            .rev()
+            .take_while(|c| *c == ' ')
+            .map(|c| c.len_utf8())
+            .sum();
         let at = self.cursor - skip_space;
-        let word_len: usize = self.query[..at].chars().rev()
-            .take_while(|c| *c != ' ').map(|c| c.len_utf8()).sum();
+        let word_len: usize = self.query[..at]
+            .chars()
+            .rev()
+            .take_while(|c| *c != ' ')
+            .map(|c| c.len_utf8())
+            .sum();
         self.cursor = at - word_len;
     }
 
-    pub fn cursor_home(&mut self) { self.cursor = 0; }
-    pub fn cursor_end(&mut self) { self.cursor = self.query.len(); }
+    pub fn cursor_home(&mut self) {
+        self.cursor = 0;
+    }
+    pub fn cursor_end(&mut self) {
+        self.cursor = self.query.len();
+    }
 
     /// Current DSL token being typed (last whitespace-delimited word).
     pub fn current_token(&self) -> &str {
-        self.query[..self.cursor].rsplit_once(' ')
-            .map(|(_, w)| w).unwrap_or(&self.query[..self.cursor])
+        self.query[..self.cursor]
+            .rsplit_once(' ')
+            .map(|(_, w)| w)
+            .unwrap_or(&self.query[..self.cursor])
     }
 
     /// Accept the current autocomplete candidate — replaces the current token.
     pub fn accept_autocomplete(&mut self, candidate: &str) {
         // Extract DSL key prefix from candidate (e.g. "@author:Steve Klabnik" → "@author:Steve Klabnik")
         // Just replace the current incomplete token with the candidate
-        let token_start = self.query[..self.cursor].rfind(' ')
-            .map(|i| i + 1).unwrap_or(0);
-        self.query.replace_range(token_start..self.cursor, candidate);
+        let token_start = self.query[..self.cursor]
+            .rfind(' ')
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        self.query
+            .replace_range(token_start..self.cursor, candidate);
         self.cursor = token_start + candidate.len();
         // Add trailing space so user can type next token
         if !self.query[self.cursor..].starts_with(' ') {

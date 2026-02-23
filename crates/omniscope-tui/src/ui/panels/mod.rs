@@ -8,8 +8,8 @@ pub mod statusbar;
 pub mod sync;
 
 use crate::app::App;
-use ratatui::layout::Rect;
 use ratatui::Frame;
+use ratatui::layout::Rect;
 
 pub fn render_body(frame: &mut Frame, app: &App, area: Rect) {
     if app.active_panel == crate::app::ActivePanel::Sync {

@@ -1,9 +1,10 @@
 use crate::app::{App, Mode};
 use crate::keys::core::motions;
-use crate::keys::core::operator::execute_operator;
 use crate::keys::core::operator::Operator;
+use crate::keys::core::operator::execute_operator;
 use crate::keys::core::text_objects::{self, TextObjectKind};
 use crate::keys::ext::find_char;
+use crate::keys::ext::science_bindings;
 use crossterm::event::{KeyCode, KeyModifiers};
 
 pub(crate) fn handle_pending_mode(app: &mut App, code: KeyCode, _modifiers: KeyModifiers) {
@@ -16,6 +17,12 @@ pub(crate) fn handle_pending_mode(app: &mut App, code: KeyCode, _modifiers: KeyM
     };
 
     if let KeyCode::Char(c) = code {
+        if operator == Operator::Yank && science_bindings::handle_yank_science_command(app, c) {
+            app.reset_vim_count();
+            app.mode = Mode::Normal;
+            return;
+        }
+
         // 1. Handle Double Operator (e.g. `dd`, `yy`) -> Linewise on current line
         let op_char = match operator {
             Operator::Delete => 'd',
@@ -38,37 +45,17 @@ pub(crate) fn handle_pending_mode(app: &mut App, code: KeyCode, _modifiers: KeyM
             return;
         }
 
-        // 1.5 Handle text object prefix FIRST (i or a)
-        // This must come before quick edits to allow `cab`, `cat`, `cal`, etc.
-        if (c == 'i' || c == 'a') && app.pending_key.is_none() {
-            app.pending_key = Some(c);
-            return;
-        }
-
-        // 1.6 Handle pending text object (e.g., after 'i' or 'a')
-        if let Some(pending) = app.pending_key {
-            if pending == 'i' || pending == 'a' {
-                app.pending_key = None;
-                let kind = if pending == 'i' {
-                    TextObjectKind::Inner
-                } else {
-                    TextObjectKind::Around
-                };
-
-                if let Some(range) = text_objects::get_text_object_range(app, c, kind) {
-                    execute_operator(app, operator, range);
-                }
+        // 1.5 Handle Quick Edits for Change ('c')
+        if operator == Operator::Change {
+            if science_bindings::handle_change_science_command(app, c) {
                 app.reset_vim_count();
                 app.mode = Mode::Normal;
                 return;
             }
-        }
 
-        // 1.7 Handle Quick Edits for Change ('c') - after text objects
-        if operator == Operator::Change {
             match c {
-                'A' => {
-                    // change authors (Shift+a to avoid conflict with text object 'a')
+                'a' => {
+                    // change authors
                     app.reset_vim_count();
                     app.mode = Mode::Normal;
                     if let Some(book) = app.selected_book() {
@@ -139,8 +126,25 @@ pub(crate) fn handle_pending_mode(app: &mut App, code: KeyCode, _modifiers: KeyM
             }
         }
 
-        // 2. Handle pending 'g' (e.g. `dg...`)
+        // 2. Handle Text Objects (prefix `i` or `a`)
         if let Some(pending) = app.pending_key {
+            if pending == 'i' || pending == 'a' {
+                app.pending_key = None;
+                let kind = if pending == 'i' {
+                    TextObjectKind::Inner
+                } else {
+                    TextObjectKind::Around
+                };
+
+                if let Some(range) = text_objects::get_text_object_range(app, c, kind) {
+                    execute_operator(app, operator, range);
+                }
+                app.reset_vim_count();
+                app.mode = Mode::Normal;
+                return;
+            }
+
+            // If we were waiting for 'g' (e.g. `dg...`)
             if pending == 'g' {
                 app.pending_key = None;
                 if c == 'g' {
@@ -167,8 +171,10 @@ pub(crate) fn handle_pending_mode(app: &mut App, code: KeyCode, _modifiers: KeyM
             }
         }
 
-        // 3. Handle special motion prefixes (f, F, t, T, g)
-        if (c == 'f' || c == 'F' || c == 't' || c == 'T') && app.pending_key.is_none() {
+        // If no pending key, checking for start of text object or special motion prefix
+        if (c == 'i' || c == 'a' || c == 'f' || c == 'F' || c == 't' || c == 'T')
+            && app.pending_key.is_none()
+        {
             app.pending_key = Some(c);
             return;
         }

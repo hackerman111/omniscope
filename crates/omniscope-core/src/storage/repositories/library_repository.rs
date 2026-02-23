@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use std::sync::MutexGuard;
 
 use crate::error::Result;
@@ -67,16 +67,18 @@ impl<'a> Repository for SqliteLibraryRepository<'a> {
     }
 
     fn delete(&self, id: &Self::Id) -> Result<bool> {
-        let deleted = self.conn.execute("DELETE FROM libraries WHERE id = ?1", params![id])?;
+        let deleted = self
+            .conn
+            .execute("DELETE FROM libraries WHERE id = ?1", params![id])?;
         Ok(deleted > 0)
     }
 }
 
 impl<'a> LibraryRepository for SqliteLibraryRepository<'a> {
     fn list(&self) -> Result<Vec<Library>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, name, description, icon, color FROM libraries ORDER BY name",
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, name, description, icon, color FROM libraries ORDER BY name")?;
         let rows = stmt.query_map([], |row| {
             Ok(Library {
                 id: row.get(0)?,

@@ -3,5 +3,6 @@
 *.swo
 *~
 .DS_Store
-.claude/*
+/.claude/*
 .env
+/Deep_Learning_1

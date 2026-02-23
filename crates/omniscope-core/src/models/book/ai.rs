@@ -6,6 +6,9 @@ pub struct BookAi {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
 
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tldr: Option<String>,
+
     #[serde(default)]
     pub table_of_contents: Vec<TocEntry>,
 

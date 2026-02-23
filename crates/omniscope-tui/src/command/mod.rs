@@ -1,4 +1,4 @@
-pub mod parser;
 pub mod executor;
-pub use parser::{CommandAction, parse_command};
+pub mod parser;
 pub use executor::execute_command;
+pub use parser::{CommandAction, parse_command};

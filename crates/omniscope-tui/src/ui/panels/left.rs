@@ -1,8 +1,8 @@
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::Span;
 use ratatui::widgets::{Block, Borders, List, ListItem};
-use ratatui::Frame;
 
 use crate::app::{ActivePanel, App, SidebarItem};
 

@@ -53,7 +53,9 @@ impl MacroRecorder {
 
     /// List all recorded macros (register + length).
     pub fn list_macros(&self) -> Vec<(char, usize)> {
-        let mut result: Vec<_> = self.macros.iter()
+        let mut result: Vec<_> = self
+            .macros
+            .iter()
             .map(|(&reg, keys)| (reg, keys.len()))
             .collect();
         result.sort_by_key(|(reg, _)| *reg);
@@ -68,17 +70,17 @@ mod tests {
     #[test]
     fn test_record_and_replay() {
         let mut rec = MacroRecorder::new();
-        
+
         rec.start_recording('a');
         assert!(rec.is_recording());
-        
+
         rec.record_key(KeyCode::Char('j'), KeyModifiers::NONE);
         rec.record_key(KeyCode::Char('j'), KeyModifiers::NONE);
         rec.record_key(KeyCode::Char('k'), KeyModifiers::NONE);
-        
+
         rec.stop_recording();
         assert!(!rec.is_recording());
-        
+
         let macro_a = rec.get_macro('a').unwrap();
         assert_eq!(macro_a.len(), 3);
         assert_eq!(macro_a[0], (KeyCode::Char('j'), KeyModifiers::NONE));
@@ -87,16 +89,16 @@ mod tests {
     #[test]
     fn test_list_macros() {
         let mut rec = MacroRecorder::new();
-        
+
         rec.start_recording('b');
         rec.record_key(KeyCode::Char('j'), KeyModifiers::NONE);
         rec.stop_recording();
-        
+
         rec.start_recording('a');
         rec.record_key(KeyCode::Char('k'), KeyModifiers::NONE);
         rec.record_key(KeyCode::Char('k'), KeyModifiers::NONE);
         rec.stop_recording();
-        
+
         let list = rec.list_macros();
         assert_eq!(list.len(), 2);
         assert_eq!(list[0], ('a', 2));

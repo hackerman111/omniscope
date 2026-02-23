@@ -1,4 +1,4 @@
-use crate::app::{App, Mode};
+use crate::app::{ActivePanel, App, Mode};
 use crate::keys::core::operator::Operator;
 
 pub struct KeyHint {
@@ -214,7 +214,7 @@ pub fn get_hints(app: &App) -> Vec<KeyHint> {
                         key: "u",
                         desc: "updated (default)",
                     },
-                ]
+                ];
             }
             'g' => {
                 return vec![
@@ -236,11 +236,35 @@ pub fn get_hints(app: &App) -> Vec<KeyHint> {
                     },
                     KeyHint {
                         key: "r",
-                        desc: "root",
+                        desc: "refs/root",
+                    },
+                    KeyHint {
+                        key: "R",
+                        desc: "cited-by",
                     },
                     KeyHint {
                         key: "s",
-                        desc: "cycle status",
+                        desc: "related",
+                    },
+                    KeyHint {
+                        key: "S",
+                        desc: "status",
+                    },
+                    KeyHint {
+                        key: "d",
+                        desc: "open DOI",
+                    },
+                    KeyHint {
+                        key: "a",
+                        desc: "open arXiv",
+                    },
+                    KeyHint {
+                        key: "A",
+                        desc: "open arXiv PDF",
+                    },
+                    KeyHint {
+                        key: "o",
+                        desc: "open OA PDF",
                     },
                     KeyHint {
                         key: "t",
@@ -278,7 +302,7 @@ pub fn get_hints(app: &App) -> Vec<KeyHint> {
                         key: "B",
                         desc: "prev buffer",
                     },
-                ]
+                ];
             }
             'z' => {
                 return vec![
@@ -314,7 +338,7 @@ pub fn get_hints(app: &App) -> Vec<KeyHint> {
                         key: "M",
                         desc: "close all",
                     },
-                ]
+                ];
             }
             'm' => {
                 return vec![
@@ -326,7 +350,7 @@ pub fn get_hints(app: &App) -> Vec<KeyHint> {
                         key: "A-Z",
                         desc: "set global mark",
                     },
-                ]
+                ];
             }
             '\'' => {
                 return vec![
@@ -346,19 +370,19 @@ pub fn get_hints(app: &App) -> Vec<KeyHint> {
                         key: ">",
                         desc: "visual end",
                     },
-                ]
+                ];
             }
             '[' => {
                 return vec![KeyHint {
                     key: "[",
                     desc: "prev group",
-                }]
+                }];
             }
             ']' => {
                 return vec![KeyHint {
                     key: "]",
                     desc: "next group",
-                }]
+                }];
             }
             ' ' => {
                 return vec![
@@ -378,19 +402,19 @@ pub fn get_hints(app: &App) -> Vec<KeyHint> {
                         key: "/",
                         desc: "by first letter",
                     },
-                ]
+                ];
             }
             'f' | 'F' | 't' | 'T' => {
                 return vec![KeyHint {
                     key: "<char>",
                     desc: "jump to char",
-                }]
+                }];
             }
             'Q' => {
                 return vec![KeyHint {
                     key: "a-z",
                     desc: "register to record",
-                }]
+                }];
             }
             '@' => {
                 return vec![
@@ -402,13 +426,58 @@ pub fn get_hints(app: &App) -> Vec<KeyHint> {
                         key: "@",
                         desc: "replay last",
                     },
-                ]
+                    KeyHint {
+                        key: "e",
+                        desc: "AI enrich",
+                    },
+                    KeyHint {
+                        key: "m",
+                        desc: "metadata enrich",
+                    },
+                    KeyHint {
+                        key: "r",
+                        desc: "AI refs",
+                    },
+                ];
             }
             _ => {}
         }
     }
 
     // 6. Normal mode — show basic hints
+    if app.mode == Mode::Normal && app.active_panel == ActivePanel::Preview {
+        return vec![
+            KeyHint {
+                key: "j/k",
+                desc: "scroll preview",
+            },
+            KeyHint {
+                key: "h/l",
+                desc: "focus panel",
+            },
+            KeyHint {
+                key: "r/c/f",
+                desc: "refs/cited/find",
+            },
+            KeyHint {
+                key: "o/e",
+                desc: "open pdf/bibtex",
+            },
+            KeyHint {
+                key: "gr/gR/gs",
+                desc: "refs/cited/related",
+            },
+            KeyHint {
+                key: "@m/@e/@r",
+                desc: "meta/ai/refs",
+            },
+            KeyHint {
+                key: ":help",
+                desc: "full help",
+            },
+        ];
+    }
+
     vec![
         KeyHint {
             key: "j/k",
@@ -468,11 +537,15 @@ pub fn get_hints(app: &App) -> Vec<KeyHint> {
         },
         KeyHint {
             key: "g",
-            desc: "g-commands",
+            desc: "goto commands",
         },
         KeyHint {
             key: "z",
             desc: "viewport",
+        },
+        KeyHint {
+            key: ":help",
+            desc: "full help",
         },
     ]
 }

@@ -1,5 +1,5 @@
-use crossterm::event::KeyCode;
 use crate::app::App;
+use crossterm::event::KeyCode;
 
 pub fn handle_sort_command(app: &mut App, code: KeyCode) {
     use crate::app::SortKey;
@@ -35,11 +35,11 @@ pub fn handle_sort_command(app: &mut App, code: KeyCode) {
             app.status_message = "Sort: Updated (Default)".to_string();
         }
         _ => {
-             if code == KeyCode::Esc {
-                 app.status_message.clear();
-             } else {
-                 app.status_message = "Sort cancelled".to_string();
-             }
+            if code == KeyCode::Esc {
+                app.status_message.clear();
+            } else {
+                app.status_message = "Sort cancelled".to_string();
+            }
         }
     }
 }

@@ -150,7 +150,10 @@ fn tokenize(input: &str) -> Vec<String> {
 
 fn parse_token(token: &str) -> Option<SearchFilter> {
     // @author:name or @name
-    if let Some(rest) = token.strip_prefix("@author:").or_else(|| token.strip_prefix("@")) {
+    if let Some(rest) = token
+        .strip_prefix("@author:")
+        .or_else(|| token.strip_prefix("@"))
+    {
         return Some(SearchFilter::Author(rest.to_string()));
     }
 
@@ -172,7 +175,10 @@ fn parse_token(token: &str) -> Option<SearchFilter> {
     }
 
     // s:STATUS
-    if let Some(rest) = token.strip_prefix("s:").or_else(|| token.strip_prefix("status:")) {
+    if let Some(rest) = token
+        .strip_prefix("s:")
+        .or_else(|| token.strip_prefix("status:"))
+    {
         let status = match rest {
             "unread" => ReadStatus::Unread,
             "reading" => ReadStatus::Reading,
@@ -184,12 +190,18 @@ fn parse_token(token: &str) -> Option<SearchFilter> {
     }
 
     // f:FORMAT
-    if let Some(rest) = token.strip_prefix("f:").or_else(|| token.strip_prefix("format:")) {
+    if let Some(rest) = token
+        .strip_prefix("f:")
+        .or_else(|| token.strip_prefix("format:"))
+    {
         return Some(SearchFilter::Format(rest.to_lowercase()));
     }
 
     // lib:NAME
-    if let Some(rest) = token.strip_prefix("lib:").or_else(|| token.strip_prefix("library:")) {
+    if let Some(rest) = token
+        .strip_prefix("lib:")
+        .or_else(|| token.strip_prefix("library:"))
+    {
         return Some(SearchFilter::Library(rest.to_string()));
     }
 
@@ -212,13 +224,19 @@ fn parse_year_filter(s: &str) -> Option<YearFilter> {
         return rest.parse().ok().map(YearFilter::GreaterThan);
     }
     if let Some(rest) = s.strip_prefix('>') {
-        return rest.parse::<i32>().ok().map(|y| YearFilter::GreaterThan(y + 1));
+        return rest
+            .parse::<i32>()
+            .ok()
+            .map(|y| YearFilter::GreaterThan(y + 1));
     }
     if let Some(rest) = s.strip_prefix("<=") {
         return rest.parse().ok().map(YearFilter::LessThan);
     }
     if let Some(rest) = s.strip_prefix('<') {
-        return rest.parse::<i32>().ok().map(|y| YearFilter::LessThan(y - 1));
+        return rest
+            .parse::<i32>()
+            .ok()
+            .map(|y| YearFilter::LessThan(y - 1));
     }
 
     // y:2020-2023 or y:2020..2023
@@ -263,7 +281,9 @@ fn filter_matches(filter: &SearchFilter, book: &BookSummaryView) -> bool {
     match filter {
         SearchFilter::Author(name) => {
             let name_lower = name.to_lowercase();
-            book.authors.iter().any(|a| a.to_lowercase().contains(&name_lower))
+            book.authors
+                .iter()
+                .any(|a| a.to_lowercase().contains(&name_lower))
         }
         SearchFilter::Tag(tag) => {
             let tag_lower = tag.to_lowercase();
@@ -299,11 +319,10 @@ fn filter_matches(filter: &SearchFilter, book: &BookSummaryView) -> bool {
             }
         }
         SearchFilter::Status(status) => book.read_status == *status,
-        SearchFilter::Format(fmt) => {
-            book.format
-                .map(|f| f.to_string().to_lowercase() == *fmt)
-                .unwrap_or(false)
-        }
+        SearchFilter::Format(fmt) => book
+            .format
+            .map(|f| f.to_string().to_lowercase() == *fmt)
+            .unwrap_or(false),
         SearchFilter::Library(_lib) => {
             // Library filter is applied at the DB level, always true here
             true
@@ -320,7 +339,13 @@ mod tests {
     use super::*;
     use crate::models::BookCard;
 
-    fn make_book(title: &str, authors: &[&str], tags: &[&str], year: Option<i32>, rating: Option<u8>) -> BookSummaryView {
+    fn make_book(
+        title: &str,
+        authors: &[&str],
+        tags: &[&str],
+        year: Option<i32>,
+        rating: Option<u8>,
+    ) -> BookSummaryView {
         let mut card = BookCard::new(title);
         card.metadata.authors = authors.iter().map(|s| s.to_string()).collect();
         card.organization.tags = tags.iter().map(|s| s.to_string()).collect();
@@ -353,31 +378,46 @@ mod tests {
     #[test]
     fn test_parse_year_exact() {
         let q = SearchQuery::parse("y:2023");
-        assert!(matches!(&q.filters[0], SearchFilter::Year(YearFilter::Exact(2023))));
+        assert!(matches!(
+            &q.filters[0],
+            SearchFilter::Year(YearFilter::Exact(2023))
+        ));
     }
 
     #[test]
     fn test_parse_year_range() {
         let q = SearchQuery::parse("y:2020-2023");
-        assert!(matches!(&q.filters[0], SearchFilter::Year(YearFilter::Range(2020, 2023))));
+        assert!(matches!(
+            &q.filters[0],
+            SearchFilter::Year(YearFilter::Range(2020, 2023))
+        ));
     }
 
     #[test]
     fn test_parse_year_gt() {
         let q = SearchQuery::parse("y:>2020");
-        assert!(matches!(&q.filters[0], SearchFilter::Year(YearFilter::GreaterThan(_))));
+        assert!(matches!(
+            &q.filters[0],
+            SearchFilter::Year(YearFilter::GreaterThan(_))
+        ));
     }
 
     #[test]
     fn test_parse_rating() {
         let q = SearchQuery::parse("r:>=4");
-        assert!(matches!(&q.filters[0], SearchFilter::Rating(CompareOp::Gte(4))));
+        assert!(matches!(
+            &q.filters[0],
+            SearchFilter::Rating(CompareOp::Gte(4))
+        ));
     }
 
     #[test]
     fn test_parse_status() {
         let q = SearchQuery::parse("s:unread");
-        assert!(matches!(&q.filters[0], SearchFilter::Status(ReadStatus::Unread)));
+        assert!(matches!(
+            &q.filters[0],
+            SearchFilter::Status(ReadStatus::Unread)
+        ));
     }
 
     #[test]

@@ -1,8 +1,21 @@
 use crate::app::App;
+use crate::panels::citation_graph::{CitationGraphPanel, CitationGraphPanelAction, GraphMode};
+use crate::panels::find_download::{
+    FindDownloadPanel, FindDownloadPanelAction, FindResult, FindSource,
+};
+use crate::panels::references::{ReferenceAddTarget, ReferencesPanelAction};
 use crate::popup::{Popup, TelescopeMode};
-use crossterm::event::{KeyCode, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use omniscope_science::identifiers::extract::{
+    extract_arxiv_ids_from_text, extract_dois_from_text,
+};
+use omniscope_science::identifiers::{arxiv::ArxivId, doi::Doi};
 
 pub(crate) fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
+    if handle_science_popup_key(app, code, modifiers) {
+        return;
+    }
+
     match &mut app.popup {
         Some(Popup::AddBook(form)) => {
             // Check if we are editing the "File path" field (index 5)
@@ -654,298 +667,637 @@ pub(crate) fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModif
             _ => {}
         },
 
-        Some(Popup::CreateFolder { .. }) => match code {
-            KeyCode::Esc => {
-                app.popup = None;
-            }
-            KeyCode::Enter => {
-                if let Some(Popup::CreateFolder { parent_id, input, .. }) = app.popup.take() {
-                    app.submit_create_folder(parent_id, &input);
-                }
-            }
-            KeyCode::Backspace => {
-                if let Some(Popup::CreateFolder { ref mut input, ref mut cursor, .. }) = app.popup {
-                    if *cursor > 0 {
-                        input.remove(*cursor - 1);
-                        *cursor -= 1;
-                    }
-                }
-            }
-            KeyCode::Char(c) => {
-                if let Some(Popup::CreateFolder { ref mut input, ref mut cursor, .. }) = app.popup {
-                    input.insert(*cursor, c);
-                    *cursor += c.len_utf8();
-                }
-            }
-            _ => {}
-        },
-
-        Some(Popup::RenameFolder { .. }) => match code {
-            KeyCode::Esc => {
-                app.popup = None;
-            }
-            KeyCode::Enter => {
-                if let Some(Popup::RenameFolder { folder_id, input, .. }) = app.popup.take() {
-                    app.submit_rename_folder(&folder_id, &input);
-                }
-            }
-            KeyCode::Backspace => {
-                if let Some(Popup::RenameFolder { ref mut input, ref mut cursor, .. }) = app.popup {
-                    if *cursor > 0 {
-                        input.remove(*cursor - 1);
-                        *cursor -= 1;
-                    }
-                }
-            }
-            KeyCode::Char(c) => {
-                if let Some(Popup::RenameFolder { ref mut input, ref mut cursor, .. }) = app.popup {
-                    input.insert(*cursor, c);
-                    *cursor += c.len_utf8();
-                }
-            }
-            _ => {}
-        },
-
-        Some(Popup::ConfirmDeleteFolder { .. }) => match code {
-            KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
-                app.popup = None;
-            }
-            KeyCode::Char('y') | KeyCode::Char('Y') => {
-                if let Some(Popup::ConfirmDeleteFolder { folder_id, keep_files, .. }) = app.popup.take() {
-                    app.submit_delete_folder(&folder_id, keep_files);
-                }
-            }
-            KeyCode::Tab => {
-                if let Some(Popup::ConfirmDeleteFolder { ref mut keep_files, .. }) = app.popup {
-                    *keep_files = !*keep_files;
-                }
-            }
-            _ => {}
-        },
-
-        Some(Popup::BulkDeleteFolders { .. }) => match code {
-            KeyCode::Esc | KeyCode::Char('n') | KeyCode::Char('N') => {
-                app.popup = None;
-            }
-            KeyCode::Char('y') | KeyCode::Char('Y') => {
-                if let Some(Popup::BulkDeleteFolders { folder_ids, keep_files }) = app.popup.take() {
-                    app.submit_bulk_delete_folders(&folder_ids, keep_files);
-                }
-            }
-            KeyCode::Tab => {
-                if let Some(Popup::BulkDeleteFolders { ref mut keep_files, .. }) = app.popup {
-                    *keep_files = !*keep_files;
-                }
-            }
-            _ => {}
-        },
-
-        Some(Popup::AttachGhostFile { .. }) => match code {
-            KeyCode::Esc => {
-                if let Some(Popup::AttachGhostFile { ref mut autocomplete, .. }) = app.popup {
-                    if autocomplete.active {
-                        autocomplete.clear();
-                    } else {
-                        app.popup = None;
-                    }
-                }
-            }
-            KeyCode::Enter => {
-                let mut should_submit = false;
-                let mut attach_id = String::new();
-                let mut attach_path = String::new();
-
-                if let Some(Popup::AttachGhostFile { ref mut autocomplete, ref mut input, ref book_id, .. }) = app.popup {
-                    if autocomplete.active {
-                        if let Some(selection) = autocomplete.current().map(|s| s.to_string()) {
-                            let current = input.clone();
-                            let expanded = if current.starts_with("~/") {
-                                if let Some(home) = dirs::home_dir() {
-                                    current.replacen("~", &home.to_string_lossy(), 1)
-                                } else {
-                                    current.clone()
-                                }
-                            } else {
-                                current.clone()
-                            };
-
-                            let path = std::path::Path::new(&expanded);
-                            let dir = if expanded.ends_with('/') {
-                                path.to_path_buf()
-                            } else {
-                                path.parent().unwrap_or(std::path::Path::new(".")).to_path_buf()
-                            };
-
-                            let new_full_path = dir.join(&selection).to_string_lossy().to_string();
-
-                            let final_val = if current.starts_with("~/") {
-                                if let Some(home) = dirs::home_dir() {
-                                    let h = home.to_string_lossy();
-                                    if new_full_path.starts_with(h.as_ref()) {
-                                        new_full_path.replacen(h.as_ref(), "~", 1)
-                                    } else {
-                                        new_full_path
-                                    }
-                                } else {
-                                    new_full_path
-                                }
-                            } else {
-                                new_full_path
-                            };
-
-                            *input = final_val;
-
-                            let check_path = if input.starts_with("~/") {
-                                if let Some(home) = dirs::home_dir() {
-                                    input.replacen("~", &home.to_string_lossy(), 1)
-                                } else {
-                                    input.clone()
-                                }
-                            } else {
-                                input.clone()
-                            };
-
-                            if let Ok(m) = std::fs::metadata(&check_path) {
-                                if m.is_dir() && !input.ends_with('/') {
-                                    input.push('/');
-                                }
-                            }
-                            autocomplete.clear();
-                        } else {
-                            autocomplete.clear();
-                        }
-                        
-                        if input.ends_with('/') {
-                            update_ghost_filepath_suggestions(input, autocomplete);
-                        }
-                        
-                    } else {
-                        should_submit = true;
-                        attach_id = book_id.clone();
-                        attach_path = input.clone();
-                    }
-                }
-
-                if should_submit {
-                    app.popup = None;
-                    if !attach_path.is_empty() {
-                        if let Some(ref db) = app.db {
-                            if let Ok(uuid) = uuid::Uuid::parse_str(&attach_id) {
-                                if let Ok(mut card) = omniscope_core::storage::json_cards::load_card_by_id(&app.cards_dir(), &uuid) {
-                                    card.file = Some(omniscope_core::models::book::BookFile {
-                                        path: attach_path.clone(),
-                                        format: omniscope_core::models::book::FileFormat::Pdf, // Default assumption
-                                        size_bytes: 0,
-                                        hash_sha256: None,
-                                        added_at: chrono::Utc::now(),
-                                    });
-                                    let _ = omniscope_core::storage::json_cards::save_card(&app.cards_dir(), &card);
-                                    let _ = db.upsert_book(&card);
-                                    app.refresh_books();
-                                    app.status_message = format!("Attached {} to {}", attach_path, attach_id);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            KeyCode::Tab => {
-                if let Some(Popup::AttachGhostFile { ref mut autocomplete, .. }) = app.popup {
-                    if autocomplete.active {
-                        autocomplete.move_down();
-                    }
-                }
-            }
-            KeyCode::BackTab => {
-                if let Some(Popup::AttachGhostFile { ref mut autocomplete, .. }) = app.popup {
-                    if autocomplete.active {
-                        autocomplete.move_up();
-                    }
-                }
-            }
-            KeyCode::Backspace => {
-                if let Some(Popup::AttachGhostFile { ref mut input, ref mut cursor, ref mut autocomplete, .. }) = app.popup {
-                    if *cursor > 0 {
-                        input.remove(*cursor - 1);
-                        *cursor -= 1;
-                        if input.is_empty() {
-                            autocomplete.clear();
-                        } else {
-                            update_ghost_filepath_suggestions(input, autocomplete);
-                        }
-                    }
-                }
-            }
-            KeyCode::Char(c) => {
-                if let Some(Popup::AttachGhostFile { ref mut input, ref mut cursor, ref mut autocomplete, .. }) = app.popup {
-                    input.insert(*cursor, c);
-                    *cursor += c.len_utf8();
-                    update_ghost_filepath_suggestions(input, autocomplete);
-                }
-            }
-            _ => {}
-        },
-
-        Some(Popup::FindGhostFilePlaceholder { .. }) => {
-            app.popup = None;
-        },
-
-        Some(Popup::CreateVirtualFolder { .. }) => match code {
-            KeyCode::Esc => {
-                app.popup = None;
-            }
-            KeyCode::Enter => {
-                if let Some(Popup::CreateVirtualFolder { input, .. }) = app.popup.take() {
-                    app.submit_create_virtual_folder(&input);
-                }
-            }
-            KeyCode::Backspace => {
-                if let Some(Popup::CreateVirtualFolder { ref mut input, ref mut cursor, .. }) = app.popup {
-                    if *cursor > 0 {
-                        input.remove(*cursor - 1);
-                        *cursor -= 1;
-                    }
-                }
-            }
-            KeyCode::Char(c) => {
-                if let Some(Popup::CreateVirtualFolder { ref mut input, ref mut cursor, .. }) = app.popup {
-                    input.insert(*cursor, c);
-                    *cursor += c.len_utf8();
-                }
-            }
-            _ => {}
-        },
-
-        Some(Popup::AddToVirtualFolder { .. }) => match code {
-            KeyCode::Esc => {
-                app.popup = None;
-            }
-            KeyCode::Enter => {
-                if let Some(Popup::AddToVirtualFolder { book_idx, selected_folder_idx, folders }) = app.popup.take() {
-                    if let Some(folder) = folders.get(selected_folder_idx) {
-                        app.submit_add_to_virtual_folder(book_idx, &folder.id);
-                    }
-                }
-            }
-            KeyCode::Char('j') | KeyCode::Down => {
-                if let Some(Popup::AddToVirtualFolder { ref mut selected_folder_idx, ref folders, .. }) = app.popup {
-                    if !folders.is_empty() && *selected_folder_idx + 1 < folders.len() {
-                        *selected_folder_idx += 1;
-                    }
-                }
-            }
-            KeyCode::Char('k') | KeyCode::Up => {
-                if let Some(Popup::AddToVirtualFolder { ref mut selected_folder_idx, .. }) = app.popup {
-                    if *selected_folder_idx > 0 {
-                        *selected_folder_idx -= 1;
-                    }
-                }
-            }
-            _ => {}
-        },
+        Some(_) => {}
 
         None => {}
     }
+}
+
+fn handle_science_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) -> bool {
+    let Some(current_popup) = app.popup.take() else {
+        return false;
+    };
+
+    match current_popup {
+        Popup::ScienceReferences {
+            mut panel,
+            book_title,
+        } => {
+            let mut keep_open = true;
+            let key = KeyEvent::new(code, modifiers);
+
+            match code {
+                KeyCode::Esc | KeyCode::Char('q') if modifiers == KeyModifiers::NONE => {
+                    keep_open = false;
+                }
+                _ => {
+                    if let Some(action) = panel.handle_key(key, 16) {
+                        match action {
+                            ReferencesPanelAction::OpenBook(book_id) => {
+                                if app.select_book_by_id(book_id) {
+                                    app.status_message = "Opened linked book".to_string();
+                                } else {
+                                    app.status_message =
+                                        format!("Linked book not found: {book_id}");
+                                }
+                                keep_open = false;
+                            }
+                            ReferencesPanelAction::ShowDetails { reference_index } => {
+                                if let Some(reference) = panel.references.get(reference_index) {
+                                    let details = format_reference_details(reference);
+                                    app.open_science_text_viewer(
+                                        format!(" Reference #{} ", reference.index),
+                                        details,
+                                    );
+                                    keep_open = false;
+                                }
+                            }
+                            ReferencesPanelAction::AddReference {
+                                reference_index,
+                                target,
+                            } => {
+                                if let Some(reference) = panel.references.get(reference_index) {
+                                    let title = reference
+                                        .resolved_title
+                                        .as_deref()
+                                        .unwrap_or(reference.raw_text.as_str())
+                                        .to_string();
+                                    let authors = reference.resolved_authors.clone();
+                                    let year = reference.resolved_year;
+                                    let doi = match target.as_ref() {
+                                        Some(ReferenceAddTarget::Doi(doi)) => Some(doi.as_str()),
+                                        _ => reference
+                                            .doi
+                                            .as_ref()
+                                            .map(|value| value.normalized.as_str()),
+                                    };
+                                    let arxiv_value = match target.as_ref() {
+                                        Some(ReferenceAddTarget::Arxiv(arxiv)) => {
+                                            Some(arxiv.to_string())
+                                        }
+                                        _ => reference.arxiv_id.as_ref().map(|value| {
+                                            if let Some(version) = value.version {
+                                                format!("{}v{version}", value.id)
+                                            } else {
+                                                value.id.clone()
+                                            }
+                                        }),
+                                    };
+
+                                    if let Some(book_id) = app.add_science_entry_to_library(
+                                        &title,
+                                        &authors,
+                                        year,
+                                        doi,
+                                        arxiv_value.as_deref(),
+                                        "Add reference",
+                                    ) {
+                                        if let Some(reference) =
+                                            panel.references.get_mut(reference_index)
+                                        {
+                                            reference.is_in_library = Some(book_id);
+                                        }
+                                    }
+                                } else {
+                                    app.status_message = "Selected reference not found".to_string();
+                                }
+                            }
+                            ReferencesPanelAction::FindOnline { reference_index } => {
+                                let query = panel
+                                    .references
+                                    .get(reference_index)
+                                    .map(reference_query)
+                                    .unwrap_or_default();
+                                if query.trim().is_empty() {
+                                    app.status_message =
+                                        "Selected reference has no searchable text".to_string();
+                                } else {
+                                    app.open_science_find_download_panel(Some(query));
+                                    keep_open = false;
+                                }
+                            }
+                            ReferencesPanelAction::AddAllUnresolved { reference_indices } => {
+                                app.status_message = format!(
+                                    "Add unresolved references: {} item(s)",
+                                    reference_indices.len()
+                                );
+                            }
+                            ReferencesPanelAction::Export { reference_indices } => {
+                                app.status_message = format!(
+                                    "Export references: {} item(s)",
+                                    reference_indices.len()
+                                );
+                            }
+                            ReferencesPanelAction::StartSearch => {
+                                app.status_message =
+                                    "Inline search in references is not implemented yet"
+                                        .to_string();
+                            }
+                        }
+                    }
+                }
+            }
+
+            if keep_open && app.popup.is_none() {
+                app.popup = Some(Popup::ScienceReferences { panel, book_title });
+            }
+            true
+        }
+        Popup::ScienceCitationGraph(mut panel) => {
+            let mut keep_open = true;
+            let key = KeyEvent::new(code, modifiers);
+
+            match code {
+                KeyCode::Esc | KeyCode::Char('q') if modifiers == KeyModifiers::NONE => {
+                    keep_open = false;
+                }
+                _ => {
+                    if let Some(action) = panel.handle_key(key) {
+                        match action {
+                            CitationGraphPanelAction::OpenBook(book_id) => {
+                                if app.select_book_by_id(book_id) {
+                                    app.status_message = "Opened linked citation".to_string();
+                                } else {
+                                    app.status_message =
+                                        format!("Linked citation not found: {book_id}");
+                                }
+                                keep_open = false;
+                            }
+                            CitationGraphPanelAction::AddToLibrary {
+                                mode,
+                                edge_index,
+                                target,
+                            } => {
+                                if let Some(edge) = citation_edge(&panel, mode, edge_index) {
+                                    let title = edge.title.clone();
+                                    let authors = edge.authors.clone();
+                                    let year = edge.year;
+                                    let doi = match target.as_ref() {
+                                        Some(
+                                            crate::panels::citation_graph::CitationAddTarget::Doi(
+                                                doi,
+                                            ),
+                                        ) => Some(doi.as_str()),
+                                        _ => {
+                                            edge.doi.as_ref().map(|value| value.normalized.as_str())
+                                        }
+                                    };
+                                    let arxiv_value = match target.as_ref() {
+                                        Some(
+                                            crate::panels::citation_graph::CitationAddTarget::Arxiv(
+                                                arxiv,
+                                            ),
+                                        ) => Some(arxiv.to_string()),
+                                        _ => edge.arxiv_id.as_ref().map(|value| {
+                                            if let Some(version) = value.version {
+                                                format!("{}v{version}", value.id)
+                                            } else {
+                                                value.id.clone()
+                                            }
+                                        }),
+                                    };
+
+                                    if let Some(book_id) = app.add_science_entry_to_library(
+                                        &title,
+                                        &authors,
+                                        year,
+                                        doi,
+                                        arxiv_value.as_deref(),
+                                        &format!("Add citation ({})", mode.label()),
+                                    ) {
+                                        if let Some(edge) =
+                                            citation_edge_mut(&mut panel, mode, edge_index)
+                                        {
+                                            edge.source_id = Some(book_id);
+                                        }
+                                    }
+                                } else {
+                                    app.status_message = "Selected citation not found".to_string();
+                                }
+                            }
+                            CitationGraphPanelAction::FindOnline { mode, edge_index } => {
+                                if let Some(query) = citation_query(&panel, mode, edge_index) {
+                                    app.open_science_find_download_panel(Some(query));
+                                    keep_open = false;
+                                } else {
+                                    app.status_message =
+                                        "No DOI/arXiv in selected citation".to_string();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if keep_open && app.popup.is_none() {
+                app.popup = Some(Popup::ScienceCitationGraph(panel));
+            }
+            true
+        }
+        Popup::ScienceFindDownload(mut panel) => {
+            let mut keep_open = true;
+            let key = KeyEvent::new(code, modifiers);
+
+            if let Some(action) = panel.handle_key(key) {
+                match action {
+                    FindDownloadPanelAction::Download {
+                        source,
+                        result_index,
+                    } => {
+                        if let Some(url) = download_url_for_result(&panel, source, result_index) {
+                            app.open_external_url(&url, "download");
+                        } else {
+                            app.status_message = format!(
+                                "No download URL for {} #{}",
+                                source_name(source),
+                                result_index + 1
+                            );
+                        }
+                    }
+                    FindDownloadPanelAction::ImportMetadata {
+                        source,
+                        result_index,
+                    } => {
+                        app.import_science_metadata_from_find_result(&panel, source, result_index);
+                    }
+                    FindDownloadPanelAction::OpenInBrowser {
+                        source,
+                        result_index,
+                    } => {
+                        if let Some(url) = find_result(&panel, source, result_index)
+                            .and_then(|item| item.open_url.as_deref())
+                        {
+                            app.open_external_url(url, "result");
+                        } else {
+                            app.status_message =
+                                format!("No URL for {} #{}", source_name(source), result_index + 1);
+                        }
+                    }
+                    FindDownloadPanelAction::Close => {
+                        keep_open = false;
+                    }
+                }
+            }
+
+            if keep_open && app.popup.is_none() {
+                app.popup = Some(Popup::ScienceFindDownload(panel));
+            }
+            true
+        }
+        Popup::EditDoi {
+            book_id,
+            mut input,
+            mut cursor,
+        } => {
+            let mut keep_open = true;
+            match code {
+                KeyCode::Esc => keep_open = false,
+                KeyCode::Enter => {
+                    app.submit_edit_science_doi(&book_id, &input);
+                    keep_open = false;
+                }
+                KeyCode::Backspace => {
+                    delete_prev_char(&mut input, &mut cursor);
+                }
+                KeyCode::Left => {
+                    cursor = prev_char_boundary(&input, cursor);
+                }
+                KeyCode::Right => {
+                    cursor = next_char_boundary(&input, cursor);
+                }
+                KeyCode::Char(c) => {
+                    if !c.is_control() {
+                        input.insert(cursor, c);
+                        cursor += c.len_utf8();
+                    }
+                }
+                _ => {}
+            }
+
+            if keep_open && app.popup.is_none() {
+                app.popup = Some(Popup::EditDoi {
+                    book_id,
+                    input,
+                    cursor,
+                });
+            }
+            true
+        }
+        Popup::EditArxivId {
+            book_id,
+            mut input,
+            mut cursor,
+        } => {
+            let mut keep_open = true;
+            match code {
+                KeyCode::Esc => keep_open = false,
+                KeyCode::Enter => {
+                    app.submit_edit_science_arxiv_id(&book_id, &input);
+                    keep_open = false;
+                }
+                KeyCode::Backspace => {
+                    delete_prev_char(&mut input, &mut cursor);
+                }
+                KeyCode::Left => {
+                    cursor = prev_char_boundary(&input, cursor);
+                }
+                KeyCode::Right => {
+                    cursor = next_char_boundary(&input, cursor);
+                }
+                KeyCode::Char(c) => {
+                    if is_valid_arxiv_char(c) {
+                        input.insert(cursor, c);
+                        cursor += c.len_utf8();
+                    }
+                }
+                _ => {}
+            }
+
+            if keep_open && app.popup.is_none() {
+                app.popup = Some(Popup::EditArxivId {
+                    book_id,
+                    input,
+                    cursor,
+                });
+            }
+            true
+        }
+        Popup::TextViewer {
+            title,
+            body,
+            mut scroll,
+        } => {
+            let mut keep_open = true;
+            let line_count = body.lines().count().max(1);
+
+            match code {
+                KeyCode::Esc | KeyCode::Char('q') if modifiers == KeyModifiers::NONE => {
+                    keep_open = false;
+                }
+                KeyCode::Down | KeyCode::Char('j') => {
+                    scroll = scroll.saturating_add(1).min(line_count.saturating_sub(1));
+                }
+                KeyCode::Up | KeyCode::Char('k') => {
+                    scroll = scroll.saturating_sub(1);
+                }
+                KeyCode::Char('d') if modifiers.contains(KeyModifiers::CONTROL) => {
+                    scroll = scroll.saturating_add(10).min(line_count.saturating_sub(1));
+                }
+                KeyCode::Char('u') if modifiers.contains(KeyModifiers::CONTROL) => {
+                    scroll = scroll.saturating_sub(10);
+                }
+                KeyCode::Char('g') => {
+                    scroll = 0;
+                }
+                KeyCode::Char('G') => {
+                    scroll = line_count.saturating_sub(1);
+                }
+                _ => {}
+            }
+
+            if keep_open && app.popup.is_none() {
+                app.popup = Some(Popup::TextViewer {
+                    title,
+                    body,
+                    scroll,
+                });
+            }
+            true
+        }
+        popup => {
+            app.popup = Some(popup);
+            false
+        }
+    }
+}
+
+fn source_name(source: FindSource) -> &'static str {
+    match source {
+        FindSource::AnnaArchive => "Anna's Archive",
+        FindSource::SciHub => "Sci-Hub",
+        FindSource::OpenAlex => "OpenAlex",
+        FindSource::SemanticGraph => "Semantic Scholar",
+    }
+}
+
+fn find_result(
+    panel: &FindDownloadPanel,
+    source: FindSource,
+    result_index: usize,
+) -> Option<&FindResult> {
+    match source {
+        FindSource::AnnaArchive => panel.anna_results.get(result_index),
+        FindSource::SciHub => panel.sci_hub_results.get(result_index),
+        FindSource::OpenAlex => panel.open_alex_results.get(result_index),
+        FindSource::SemanticGraph => panel.semantic_scholar_results.get(result_index),
+    }
+}
+
+fn citation_edge(
+    panel: &CitationGraphPanel,
+    mode: GraphMode,
+    edge_index: usize,
+) -> Option<&crate::panels::citation_graph::CitationEdge> {
+    match mode {
+        GraphMode::References => panel.references.get(edge_index),
+        GraphMode::CitedBy => panel.cited_by.get(edge_index),
+        GraphMode::Related => panel.related.get(edge_index),
+    }
+}
+
+fn citation_edge_mut(
+    panel: &mut CitationGraphPanel,
+    mode: GraphMode,
+    edge_index: usize,
+) -> Option<&mut crate::panels::citation_graph::CitationEdge> {
+    match mode {
+        GraphMode::References => panel.references.get_mut(edge_index),
+        GraphMode::CitedBy => panel.cited_by.get_mut(edge_index),
+        GraphMode::Related => panel.related.get_mut(edge_index),
+    }
+}
+
+fn download_url_for_result(
+    panel: &FindDownloadPanel,
+    source: FindSource,
+    result_index: usize,
+) -> Option<String> {
+    let result = find_result(panel, source, result_index)?;
+    if let Some(url) = result
+        .open_url
+        .as_ref()
+        .map(|value| value.trim().to_string())
+        && !url.is_empty()
+    {
+        return Some(url);
+    }
+
+    if let Some(primary_id) = result.primary_id.as_deref() {
+        if let Some(doi) = parse_doi_from_any(primary_id) {
+            return Some(doi.url);
+        }
+        if let Some(arxiv_id) = parse_arxiv_from_any(primary_id) {
+            return Some(arxiv_id.pdf_url);
+        }
+    }
+
+    if let Some(arxiv_id) = parse_arxiv_from_any(&result.title) {
+        return Some(arxiv_id.pdf_url);
+    }
+    if let Some(doi) = parse_doi_from_any(&result.title) {
+        return Some(doi.url);
+    }
+
+    let query = panel.query.trim();
+    if query.is_empty() {
+        return None;
+    }
+    if let Some(doi) = parse_doi_from_any(query) {
+        return Some(doi.url);
+    }
+    if let Some(arxiv_id) = parse_arxiv_from_any(query) {
+        return Some(arxiv_id.pdf_url);
+    }
+
+    let encoded_query = query.split_whitespace().collect::<Vec<_>>().join("+");
+    Some(format!("https://duckduckgo.com/?q={encoded_query}"))
+}
+
+fn citation_query(
+    panel: &CitationGraphPanel,
+    mode: GraphMode,
+    edge_index: usize,
+) -> Option<String> {
+    let edge = match mode {
+        GraphMode::References => panel.references.get(edge_index),
+        GraphMode::CitedBy => panel.cited_by.get(edge_index),
+        GraphMode::Related => panel.related.get(edge_index),
+    }?;
+
+    if let Some(doi) = &edge.doi {
+        return Some(doi.normalized.clone());
+    }
+    if let Some(arxiv_id) = &edge.arxiv_id {
+        return Some(if let Some(version) = arxiv_id.version {
+            format!("{}v{version}", arxiv_id.id)
+        } else {
+            arxiv_id.id.clone()
+        });
+    }
+    if !edge.title.trim().is_empty() {
+        return Some(edge.title.trim().to_string());
+    }
+    None
+}
+
+fn reference_query(reference: &omniscope_science::references::ExtractedReference) -> String {
+    if let Some(doi) = &reference.doi {
+        return doi.normalized.clone();
+    }
+    if let Some(arxiv_id) = &reference.arxiv_id {
+        return if let Some(version) = arxiv_id.version {
+            format!("{}v{version}", arxiv_id.id)
+        } else {
+            arxiv_id.id.clone()
+        };
+    }
+    reference.raw_text.clone()
+}
+
+fn format_reference_details(
+    reference: &omniscope_science::references::ExtractedReference,
+) -> String {
+    let mut lines = vec![
+        format!("index: {}", reference.index),
+        format!(
+            "resolution: {:?} (confidence {:.2})",
+            reference.resolution_method, reference.confidence
+        ),
+    ];
+
+    if let Some(doi) = &reference.doi {
+        lines.push(format!("doi: {}", doi.normalized));
+    }
+    if let Some(arxiv_id) = &reference.arxiv_id {
+        lines.push(format!(
+            "arxiv: {}",
+            if let Some(version) = arxiv_id.version {
+                format!("{}v{version}", arxiv_id.id)
+            } else {
+                arxiv_id.id.clone()
+            }
+        ));
+    }
+    if let Some(isbn) = &reference.isbn {
+        lines.push(format!("isbn13: {}", isbn.isbn13));
+    }
+    if let Some(title) = &reference.resolved_title {
+        lines.push(format!("title: {title}"));
+    }
+    if !reference.resolved_authors.is_empty() {
+        lines.push(format!(
+            "authors: {}",
+            reference.resolved_authors.join(", ")
+        ));
+    }
+    if let Some(year) = reference.resolved_year {
+        lines.push(format!("year: {year}"));
+    }
+    if let Some(book_id) = reference.is_in_library {
+        lines.push(format!("in_library: {book_id}"));
+    }
+
+    lines.push(String::new());
+    lines.push("raw:".to_string());
+    lines.push(reference.raw_text.clone());
+    lines.join("\n")
+}
+
+fn prev_char_boundary(input: &str, cursor: usize) -> usize {
+    if cursor == 0 {
+        return 0;
+    }
+    input[..cursor]
+        .char_indices()
+        .last()
+        .map(|(idx, _)| idx)
+        .unwrap_or(0)
+}
+
+fn next_char_boundary(input: &str, cursor: usize) -> usize {
+    if cursor >= input.len() {
+        return input.len();
+    }
+    input[cursor..]
+        .char_indices()
+        .nth(1)
+        .map(|(offset, _)| cursor + offset)
+        .unwrap_or(input.len())
+}
+
+fn delete_prev_char(input: &mut String, cursor: &mut usize) {
+    if *cursor == 0 {
+        return;
+    }
+    let prev = prev_char_boundary(input, *cursor);
+    input.remove(prev);
+    *cursor = prev;
+}
+
+fn is_valid_arxiv_char(c: char) -> bool {
+    c.is_ascii_alphanumeric() || matches!(c, '.' | '/' | '-' | ':' | 'v')
+}
+
+fn parse_doi_from_any(value: &str) -> Option<Doi> {
+    Doi::parse(value)
+        .ok()
+        .or_else(|| extract_dois_from_text(value).into_iter().next())
+}
+
+fn parse_arxiv_from_any(value: &str) -> Option<ArxivId> {
+    ArxivId::parse(value)
+        .ok()
+        .or_else(|| extract_arxiv_ids_from_text(value).into_iter().next())
 }
 
 fn update_filepath_suggestions(form: &mut crate::popup::AddBookForm) {
@@ -984,11 +1336,7 @@ fn update_filepath_suggestions(form: &mut crate::popup::AddBookForm) {
             .filter_map(|e| e.ok())
             .map(|e| {
                 let name = e.file_name().to_string_lossy().to_string();
-                if e.path().is_dir() {
-                    name + "/"
-                } else {
-                    name
-                }
+                if e.path().is_dir() { name + "/" } else { name }
             })
             .filter(|name| name.starts_with(&prefix))
             .collect();
@@ -1001,58 +1349,5 @@ fn update_filepath_suggestions(form: &mut crate::popup::AddBookForm) {
         }
     } else {
         form.autocomplete.clear();
-    }
-}
-
-fn update_ghost_filepath_suggestions(input: &str, autocomplete: &mut crate::popup::AutocompleteState) {
-    let expanded_val = if input.starts_with("~/") {
-        if let Some(home) = dirs::home_dir() {
-            input.replacen("~", &home.to_string_lossy(), 1)
-        } else {
-            input.to_string()
-        }
-    } else {
-        input.to_string()
-    };
-
-    let (search_dir, prefix) = if expanded_val.ends_with('/') {
-        (std::path::PathBuf::from(&expanded_val), "".to_string())
-    } else {
-        let p = std::path::Path::new(&expanded_val);
-        let parent = if let Some(p) = p.parent() {
-            if p.as_os_str().is_empty() {
-                std::path::PathBuf::from(".")
-            } else {
-                p.to_path_buf()
-            }
-        } else {
-            std::path::PathBuf::from(".")
-        };
-        let name = p.file_name().and_then(|s| s.to_str()).unwrap_or("");
-        (parent, name.to_string())
-    };
-
-    if let Ok(entries) = std::fs::read_dir(&search_dir) {
-        let mut matches: Vec<String> = entries
-            .filter_map(|e| e.ok())
-            .map(|e| {
-                let name = e.file_name().to_string_lossy().to_string();
-                if e.path().is_dir() {
-                    name + "/"
-                } else {
-                    name
-                }
-            })
-            .filter(|name| name.starts_with(&prefix))
-            .collect();
-        match matches.len() {
-            0 => autocomplete.clear(),
-            _ => {
-                matches.sort();
-                autocomplete.activate(matches);
-            }
-        }
-    } else {
-        autocomplete.clear();
     }
 }

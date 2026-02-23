@@ -1,3 +1,3 @@
 pub mod hints;
-pub mod popup_keys;
 pub mod macro_recorder;
+pub mod popup_keys;

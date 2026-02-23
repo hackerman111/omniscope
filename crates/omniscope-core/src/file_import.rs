@@ -125,7 +125,9 @@ mod tests {
     #[test]
     fn test_import_author_title_pattern() {
         let dir = TempDir::new().unwrap();
-        let file_path = dir.path().join("Steve Klabnik - The Rust Programming Language.epub");
+        let file_path = dir
+            .path()
+            .join("Steve Klabnik - The Rust Programming Language.epub");
         File::create(&file_path).unwrap();
 
         let card = import_file(&file_path).unwrap();

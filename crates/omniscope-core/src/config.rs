@@ -119,7 +119,8 @@ impl GlobalConfig {
     /// Add a library to the known libraries registry.
     pub fn add_library(&mut self, name: &str, path: &Path, id: &str) {
         // Remove any existing entry with the same path
-        self.libraries.retain(|l| l.path != path.to_string_lossy().as_ref());
+        self.libraries
+            .retain(|l| l.path != path.to_string_lossy().as_ref());
         self.libraries.push(KnownLibrary {
             name: name.to_string(),
             path: path.to_string_lossy().to_string(),
@@ -394,7 +395,9 @@ impl AppConfig {
     ///
     /// **Legacy**: new code should use `LibraryRoot::cards_dir()`.
     pub fn cards_dir(&self) -> PathBuf {
-        PathBuf::from(&self.core.library_path).join("db").join("cards")
+        PathBuf::from(&self.core.library_path)
+            .join("db")
+            .join("cards")
     }
 
     /// Path to the SQLite database file.
@@ -455,7 +458,8 @@ mod tests {
 
     #[test]
     fn test_load_nonexistent_returns_default() {
-        let cfg = AppConfig::load_from(Path::new("/tmp/nonexistent_omniscope_config.toml")).unwrap();
+        let cfg =
+            AppConfig::load_from(Path::new("/tmp/nonexistent_omniscope_config.toml")).unwrap();
         assert_eq!(cfg.ui.theme, "catppuccin-mocha");
     }
 

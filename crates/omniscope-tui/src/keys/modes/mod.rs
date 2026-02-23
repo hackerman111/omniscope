@@ -1,7 +1,5 @@
-pub mod normal;
-pub mod visual;
-pub mod pending;
 pub mod command_mode;
+pub mod normal;
+pub mod pending;
 pub mod search;
-pub mod folder;
-pub mod sync;
+pub mod visual;

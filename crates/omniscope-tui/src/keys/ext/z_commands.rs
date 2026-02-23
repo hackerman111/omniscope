@@ -1,5 +1,5 @@
-use crossterm::event::KeyCode;
 use crate::app::App;
+use crossterm::event::KeyCode;
 
 pub fn handle_z_command(app: &mut App, code: KeyCode) {
     match code {
@@ -17,7 +17,9 @@ pub fn handle_z_command(app: &mut App, code: KeyCode) {
         // zb — scroll so current item is at bottom of viewport
         KeyCode::Char('b') => {
             let visible_height = 20_usize;
-            app.viewport_offset = app.selected_index.saturating_sub(visible_height.saturating_sub(1));
+            app.viewport_offset = app
+                .selected_index
+                .saturating_sub(visible_height.saturating_sub(1));
             app.status_message = format!("Scroll bottom: {}", app.selected_index + 1);
         }
         // za — toggle fold (group/folder)

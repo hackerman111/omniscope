@@ -94,6 +94,18 @@ impl App {
         };
     }
 
+    pub fn preview_scroll_down(&mut self, n: usize) {
+        self.preview_scroll = self.preview_scroll.saturating_add(n);
+    }
+
+    pub fn preview_scroll_up(&mut self, n: usize) {
+        self.preview_scroll = self.preview_scroll.saturating_sub(n);
+    }
+
+    pub fn preview_scroll_top(&mut self) {
+        self.preview_scroll = 0;
+    }
+
     /// Move down n times (count-aware).
     pub fn move_down_n(&mut self, n: usize) {
         for _ in 0..n {

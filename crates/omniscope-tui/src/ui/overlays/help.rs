@@ -1,18 +1,18 @@
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
-use ratatui::Frame;
 
 use crate::app::App;
 
 pub fn render(frame: &mut Frame, app: &App, area: Rect) {
-    let overlay_area = crate::ui::centered_rect(70, 70, area);
+    let overlay_area = crate::ui::centered_rect(84, 82, area);
     frame.render_widget(Clear, overlay_area);
 
     let block = Block::default()
         .title(Span::styled(
-            " HELP — omniscope vim motions ",
+            " HELP — Omniscope Keymap ",
             Style::default()
                 .fg(app.theme.frost_ice())
                 .add_modifier(Modifier::BOLD),
@@ -28,75 +28,94 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Min(5),
-            Constraint::Length(1), // Footer
+            Constraint::Length(2), // Footer
         ])
         .split(inner);
 
     let help_text = vec![
         Line::from(vec![
             Span::styled(
-                "НАВИГАЦИЯ         ",
+                " НАВИГАЦИЯ ",
                 Style::default()
                     .fg(app.theme.frost_ice())
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                "ОПЕРАТОРЫ           ",
-                Style::default()
-                    .fg(app.theme.frost_ice())
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                "РЕЖИМЫ",
-                Style::default()
-                    .fg(app.theme.frost_ice())
-                    .add_modifier(Modifier::BOLD),
+                "  j/k - вниз/вверх   h/l - смена панели   gg/G - начало/конец   / ? n N - поиск",
+                Style::default().fg(app.theme.fg()),
             ),
         ]),
         Line::from(vec![
-            Span::styled("j/k ", Style::default().fg(app.theme.yellow())),
-            Span::raw("вниз/вверх   "),
-            Span::styled("d ", Style::default().fg(app.theme.yellow())),
-            Span::raw("delete           "),
-            Span::styled("i/a/o ", Style::default().fg(app.theme.yellow())),
-            Span::raw("INSERT"),
-        ]),
-        Line::from(vec![
-            Span::styled("h/l ", Style::default().fg(app.theme.yellow())),
-            Span::raw("панель        "),
-            Span::styled("y ", Style::default().fg(app.theme.yellow())),
-            Span::raw("yank             "),
-            Span::styled("v     ", Style::default().fg(app.theme.yellow())),
-            Span::raw("VISUAL"),
-        ]),
-        Line::from(""),
-        Line::from(vec![
             Span::styled(
-                "TEXT OBJECTS       ",
+                " РЕЖИМЫ ",
                 Style::default()
                     .fg(app.theme.frost_ice())
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                "g-КОМАНДЫ           ",
+                "  i/a/o INSERT   v/V/C-v VISUAL   : COMMAND   Esc назад   u/C-r undo/redo",
+                Style::default().fg(app.theme.fg()),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                " РЕДАКТИРОВАНИЕ ",
                 Style::default()
                     .fg(app.theme.frost_ice())
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
-                "MACROS",
+                "  d/y/c + motion   . повтор   \"<reg> регистры   q<reg> запись макро   @<reg> запуск",
+                Style::default().fg(app.theme.fg()),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                " SCIENCE / PREVIEW ",
                 Style::default()
                     .fg(app.theme.frost_ice())
                     .add_modifier(Modifier::BOLD),
             ),
+            Span::styled(
+                "  r refs   c cited-by   f find/download   o open pdf   e bibtex",
+                Style::default().fg(app.theme.fg()),
+            ),
         ]),
         Line::from(vec![
-            Span::styled("il ", Style::default().fg(app.theme.yellow())),
-            Span::raw("inner library  "),
-            Span::styled("gh ", Style::default().fg(app.theme.yellow())),
-            Span::raw("home            "),
-            Span::styled("q{a} ", Style::default().fg(app.theme.yellow())),
-            Span::raw("запись"),
+            Span::styled(
+                " SCIENCE (g/@) ",
+                Style::default()
+                    .fg(app.theme.frost_ice())
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "  gr refs   gR cited-by   gs related   @m metadata   @e ai-meta   @r ai-refs",
+                Style::default().fg(app.theme.fg()),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                " POPUPS ",
+                Style::default()
+                    .fg(app.theme.frost_ice())
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "  j/k move   Enter open/details   a add   f find   d download   m import metadata",
+                Style::default().fg(app.theme.fg()),
+            ),
+        ]),
+        Line::from(vec![
+            Span::styled(
+                " БЫСТРЫЕ КОМАНДЫ ",
+                Style::default()
+                    .fg(app.theme.frost_ice())
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                "  :help  :cite [style]  :cited-by  :open  :w  :q",
+                Style::default().fg(app.theme.fg()),
+            ),
         ]),
     ];
 
@@ -106,10 +125,27 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
         Span::styled(" Esc ", Style::default().fg(app.theme.yellow())),
         Span::styled("закрыть", Style::default().fg(app.theme.muted())),
         Span::styled("  Tab ", Style::default().fg(app.theme.yellow())),
-        Span::styled("следующая секция", Style::default().fg(app.theme.muted())),
+        Span::styled(
+            "переключение в popups",
+            Style::default().fg(app.theme.muted()),
+        ),
+        Span::styled("  j/k ", Style::default().fg(app.theme.yellow())),
+        Span::styled(
+            "скролл внутри popup",
+            Style::default().fg(app.theme.muted()),
+        ),
     ]);
     frame.render_widget(
-        Paragraph::new(footer).alignment(ratatui::layout::Alignment::Center),
+        Paragraph::new(vec![
+            footer,
+            Line::from(Span::styled(
+                "Подсказки снизу экрана динамические: они зависят от режима, панели и префикса клавиши.",
+                Style::default()
+                    .fg(app.theme.muted())
+                    .add_modifier(Modifier::DIM),
+            )),
+        ])
+        .alignment(ratatui::layout::Alignment::Center),
         chunks[1],
     );
 }

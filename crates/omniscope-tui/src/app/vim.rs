@@ -1,7 +1,7 @@
 use super::{App, SortKey};
 use crate::app::Mode;
-use omniscope_core::undo::{UndoAction, UndoEntry};
 use omniscope_core::BookCard;
+use omniscope_core::undo::{UndoAction, UndoEntry};
 
 impl App {
     // ─── Phase 1: Sorting ───────────────────────────────────

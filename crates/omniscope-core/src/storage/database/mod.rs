@@ -5,8 +5,8 @@ mod schema;
 
 pub use connection::ConnectionPool;
 pub use error::DatabaseError;
-pub use migrations::{get_applied_versions, run_migrations, Migration};
-pub use schema::{init_schema, SCHEMA_VERSION};
+pub use migrations::{Migration, get_applied_versions, run_migrations};
+pub use schema::{SCHEMA_VERSION, init_schema};
 
 use std::path::Path;
 
@@ -16,7 +16,9 @@ use crate::error::{OmniscopeError, Result};
 use crate::models::{BookCard, BookSummaryView, Folder};
 use uuid::Uuid;
 
-use super::repositories::{BookRepository, FolderRepository, LibraryRepository, Repository, TagRepository};
+use super::repositories::{
+    BookRepository, FolderRepository, LibraryRepository, Repository, TagRepository,
+};
 
 pub struct DatabaseConfig {
     pub path: Option<String>,
@@ -84,6 +86,14 @@ impl Database {
         repo.find_summary(&uuid)
     }
 
+    pub fn get_book(&self, id: &str) -> Result<BookCard> {
+        let uuid = Uuid::parse_str(id).map_err(|_| OmniscopeError::BookNotFound(id.to_string()))?;
+        let conn = self.pool.get_connection();
+        let repo = super::repositories::SqliteBookRepository::new(conn);
+        repo.find_by_id(&uuid)?
+            .ok_or_else(|| OmniscopeError::BookNotFound(id.to_string()))
+    }
+
     pub fn list_books(&self, limit: usize, offset: usize) -> Result<Vec<BookSummaryView>> {
         let conn = self.pool.get_connection();
         let repo = super::repositories::SqliteBookRepository::new(conn);
@@ -129,7 +139,10 @@ impl Database {
         let conn = self.pool.get_connection();
         let repo = super::repositories::SqliteLibraryRepository::new(conn);
         let libraries = repo.list()?;
-        Ok(libraries.into_iter().map(|l| (l.name, l.book_count)).collect())
+        Ok(libraries
+            .into_iter()
+            .map(|l| (l.name, l.book_count))
+            .collect())
     }
 
     pub fn list_books_by_tag(&self, tag: &str, limit: usize) -> Result<Vec<BookSummaryView>> {
@@ -138,7 +151,11 @@ impl Database {
         repo.list_by_tag(tag, limit)
     }
 
-    pub fn list_books_by_library(&self, library: &str, limit: usize) -> Result<Vec<BookSummaryView>> {
+    pub fn list_books_by_library(
+        &self,
+        library: &str,
+        limit: usize,
+    ) -> Result<Vec<BookSummaryView>> {
         let conn = self.pool.get_connection();
         let repo = super::repositories::SqliteBookRepository::new(conn);
         repo.list_by_library(library, limit)
@@ -154,7 +171,8 @@ impl Database {
         let cards = crate::storage::json_cards::list_cards(cards_dir)?;
         let count = cards.len();
 
-        let disk_ids: std::collections::HashSet<String> = cards.iter().map(|c| c.id.to_string()).collect();
+        let disk_ids: std::collections::HashSet<String> =
+            cards.iter().map(|c| c.id.to_string()).collect();
 
         for card in &cards {
             self.upsert_book(card)?;
@@ -190,7 +208,12 @@ impl Database {
         repo.get_all_authors()
     }
 
-    pub fn create_folder(&self, name: &str, parent_id: Option<&str>, library_id: Option<&str>) -> Result<String> {
+    pub fn create_folder(
+        &self,
+        name: &str,
+        parent_id: Option<&str>,
+        library_id: Option<&str>,
+    ) -> Result<String> {
         let folder = Folder::new(name);
         let folder = match parent_id {
             Some(pid) => folder.with_parent(pid),
