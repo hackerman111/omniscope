@@ -12,9 +12,10 @@ pub use web::*;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use uuid::Uuid;
 
-use super::{BookCitationGraph, BookPublication, ScientificIdentifiers};
+use super::{BookCitationGraph, BookOpenAccessInfo, BookPublication, ScientificIdentifiers};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BookCard {
@@ -35,6 +36,9 @@ pub struct BookCard {
     pub citation_graph: BookCitationGraph,
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub open_access: Option<BookOpenAccessInfo>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub file: Option<BookFile>,
 
     #[serde(default)]
@@ -48,6 +52,9 @@ pub struct BookCard {
 
     #[serde(default)]
     pub notes: Vec<BookNote>,
+
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub metadata_sources: HashMap<String, String>,
 }
 
 impl BookCard {
@@ -62,11 +69,13 @@ impl BookCard {
             identifiers: None,
             publication: None,
             citation_graph: BookCitationGraph::default(),
+            open_access: None,
             file: None,
             organization: BookOrganization::default(),
             ai: BookAi::default(),
             web: BookWeb::default(),
             notes: Vec::new(),
+            metadata_sources: HashMap::new(),
         }
     }
 

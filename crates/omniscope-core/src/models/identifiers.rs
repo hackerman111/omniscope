@@ -28,6 +28,9 @@ pub struct ScientificIdentifiers {
 
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mag_id: Option<String>,
+
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dblp_key: Option<String>,
 }
 
 impl ScientificIdentifiers {
@@ -41,6 +44,7 @@ impl ScientificIdentifiers {
             && self.openalex_id.is_none()
             && self.semantic_scholar_id.is_none()
             && self.mag_id.is_none()
+            && self.dblp_key.is_none()
     }
 }
 

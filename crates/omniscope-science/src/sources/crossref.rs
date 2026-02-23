@@ -241,7 +241,7 @@ impl CrossRefSource {
     }
 
     #[cfg(test)]
-    fn new_for_tests(base_url: String) -> Self {
+    pub(crate) fn new_for_tests(base_url: String) -> Self {
         Self::with_config(
             base_url,
             None,

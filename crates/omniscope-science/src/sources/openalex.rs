@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 use std::fmt;
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
@@ -16,6 +18,8 @@ use crate::sources::{
 
 const BASE_URL: &str = "https://api.openalex.org";
 const CACHE_TTL_SECS: u64 = 7 * 24 * 60 * 60;
+#[cfg(test)]
+static TEST_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct OpenAlexId(String);
@@ -291,6 +295,20 @@ impl OpenAlexSource {
             cache: DiskCache::new(&cache_namespace, cache_ttl),
             base_url,
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_for_tests(base_url: String) -> Self {
+        Self::with_config(
+            base_url,
+            Duration::from_millis(1),
+            Duration::from_secs(60),
+            format!(
+                "openalex_test_{}_{}",
+                std::process::id(),
+                TEST_COUNTER.fetch_add(1, Ordering::Relaxed)
+            ),
+        )
     }
 }
 

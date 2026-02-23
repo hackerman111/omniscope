@@ -1,3 +1,5 @@
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -15,6 +17,8 @@ use crate::sources::{
 
 const BASE_URL: &str = "https://api.unpaywall.org/v2";
 const CACHE_TTL_SECS: u64 = 7 * 24 * 60 * 60;
+#[cfg(test)]
+static TEST_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct OaLocation {
@@ -131,6 +135,21 @@ impl UnpaywallSource {
             email,
             base_url,
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_for_tests(base_url: String, email: String) -> Self {
+        Self::with_config(
+            base_url,
+            email,
+            Duration::from_millis(1),
+            Duration::from_secs(60),
+            format!(
+                "unpaywall_test_{}_{}",
+                std::process::id(),
+                TEST_COUNTER.fetch_add(1, Ordering::Relaxed)
+            ),
+        )
     }
 }
 

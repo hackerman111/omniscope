@@ -121,7 +121,7 @@ impl ArxivClient {
     }
 
     #[cfg(test)]
-    fn new_for_tests(base_url: String) -> Self {
+    pub(crate) fn new_for_tests(base_url: String) -> Self {
         static COUNTER: AtomicUsize = AtomicUsize::new(0);
         let cache_namespace = format!(
             "arxiv_test_{}_{}",
