@@ -101,24 +101,64 @@ impl RateLimitedClient {
         url: &str,
         body: &B,
     ) -> Result<R> {
-        self.wait_for_rate_limit().await;
-        let resp = self
-            .client
-            .post(url)
-            .json(body)
-            .send()
+        self.post_json_with_headers(url, body, HeaderMap::new())
             .await
-            .map_err(ScienceError::Http)?;
-        if !resp.status().is_success() {
-            let status = resp.status().as_u16();
-            let msg = resp.text().await.unwrap_or_default();
-            return Err(ScienceError::ApiError(
-                url.to_string(),
-                format!("HTTP {status}: {msg}"),
-            ));
+    }
+
+    pub async fn post_json_with_headers<B: Serialize, R: DeserializeOwned>(
+        &self,
+        url: &str,
+        body: &B,
+        headers: HeaderMap,
+    ) -> Result<R> {
+        let mut attempt = 0u32;
+        loop {
+            self.wait_for_rate_limit().await;
+            let resp = self
+                .client
+                .post(url)
+                .headers(headers.clone())
+                .json(body)
+                .send()
+                .await;
+
+            match resp {
+                Ok(r) if r.status() == 429 => {
+                    if attempt >= self.max_retries {
+                        return Err(ScienceError::RateLimit("server".to_string(), 60));
+                    }
+                    let wait = r
+                        .headers()
+                        .get(RETRY_AFTER)
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(|s| s.parse::<u64>().ok())
+                        .unwrap_or(60);
+                    sleep(Duration::from_secs(wait)).await;
+                    attempt += 1;
+                }
+                Ok(r) if !r.status().is_success() => {
+                    let status = r.status().as_u16();
+                    let msg = r.text().await.unwrap_or_default();
+                    return Err(ScienceError::ApiError(
+                        url.to_string(),
+                        format!("HTTP {status}: {msg}"),
+                    ));
+                }
+                Ok(r) => {
+                    let text = r.text().await.map_err(ScienceError::Http)?;
+                    return serde_json::from_str(&text)
+                        .map_err(|e| ScienceError::Parse(e.to_string()));
+                }
+                Err(e) => {
+                    if attempt >= self.max_retries {
+                        return Err(ScienceError::Http(e));
+                    }
+                    let backoff = 2u64.pow(attempt);
+                    sleep(Duration::from_secs(backoff)).await;
+                    attempt += 1;
+                }
+            }
         }
-        let text = resp.text().await.map_err(ScienceError::Http)?;
-        serde_json::from_str(&text).map_err(|e| ScienceError::Parse(e.to_string()))
     }
 }
 
