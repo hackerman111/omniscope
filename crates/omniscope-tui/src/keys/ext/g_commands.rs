@@ -46,6 +46,60 @@ pub fn handle_g_command(app: &mut App, code: KeyCode) {
             app.status_message = "Go Home (All Books)".to_string();
         }
 
+        // gR - Go References
+        KeyCode::Char('R') => {
+            let title = app.selected_book().map(|b| b.title.clone());
+            if let Some(title) = title {
+                app.record_jump();
+                // For now, in Step 17, we just open the panel with an empty list or mock data
+                // as references are not yet stored in BookCard.
+                let refs = vec![];
+                app.active_overlay = Some(crate::app::OverlayState::References(crate::app::references::ReferencesPanelState::new(title, refs)));
+                app.mode = Mode::References;
+                app.status_message = "Opened References Panel".to_string();
+            } else {
+                app.status_message = "No book selected".to_string();
+            }
+        }
+        KeyCode::Char('C') => {
+            // "gC" - Open Citation Graph
+            if let Some(book) = app.selected_book().cloned() {
+                app.record_jump();
+                
+                let card = omniscope_core::BookCard::new(&book.title);
+                app.active_overlay = Some(crate::app::OverlayState::CitationGraph(
+                    crate::app::citation_graph::CitationGraphPanelState::new(card)
+                ));
+                app.mode = Mode::CitationGraph;
+                app.status_message = "Fetching Citation Graph...".to_string();
+
+                if let Some(tx) = &app.event_tx {
+                    crate::app::async_tasks::spawn_citation_fetch(tx.clone(), book.id);
+                }
+            } else {
+                app.status_message = "No book selected".to_string();
+            }
+        }
+        KeyCode::Char('D') => {
+            // "gD" - Find and Download
+            if let Some(book) = app.selected_book().cloned() {
+                app.record_jump();
+                
+                let query = book.title;
+                app.active_overlay = Some(crate::app::OverlayState::FindDownload(
+                    crate::app::find_download::FindDownloadPanelState::new(query.clone())
+                ));
+                app.mode = Mode::FindDownload;
+                app.status_message = "Finding alternatives...".to_string();
+
+                if let Some(tx) = &app.event_tx {
+                    crate::app::async_tasks::spawn_find_download(tx.clone(), crate::app::find_download::SearchColumn::Left, query.clone());
+                    crate::app::async_tasks::spawn_find_download(tx.clone(), crate::app::find_download::SearchColumn::Right, query);
+                }
+            } else {
+                app.status_message = "No book selected".to_string();
+            }
+        }
         // gp — Go Parent (up one level in hierarchy)
         KeyCode::Char('p') => {
             app.record_jump();

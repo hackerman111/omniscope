@@ -152,11 +152,10 @@ impl UnpaywallResult {
         }
         
         for loc in &self.oa_locations {
-            if let Some(pdf) = &loc.url_for_pdf {
-                if !pdf_urls.contains(pdf) {
+            if let Some(pdf) = &loc.url_for_pdf
+                && !pdf_urls.contains(pdf) {
                     pdf_urls.push(pdf.clone());
                 }
-            }
         }
 
         OpenAccessInfo {

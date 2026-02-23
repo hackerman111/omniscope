@@ -70,11 +70,10 @@ pub fn generate_csl_json(card: &BookCard) -> Value {
     }
 
     // Identifiers
-    if let Some(ids) = &card.identifiers {
-        if let Some(doi) = &ids.doi {
+    if let Some(ids) = &card.identifiers
+        && let Some(doi) = &ids.doi {
             item["DOI"] = json!(doi);
         }
-    }
 
     if !card.metadata.isbn.is_empty() {
         item["ISBN"] = json!(card.metadata.isbn.join(", "));

@@ -93,9 +93,7 @@ impl ArxivUpdater {
             
             card.metadata.title = update.new_metadata.title.clone();
             
-            if let Some(ref abstract_text) = update.new_metadata.abstract_text {
-                card.ai.summary = Some(abstract_text.clone());
-            }
+            card.ai.summary = Some(update.new_metadata.abstract_text.clone());
 
             if let Some(identifiers) = &mut card.identifiers {
                 identifiers.arxiv_id = Some(update.new_metadata.arxiv_id.raw.clone());

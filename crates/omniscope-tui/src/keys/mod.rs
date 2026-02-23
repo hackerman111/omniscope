@@ -45,6 +45,9 @@ pub(crate) fn handle_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) 
         Mode::Pending => modes::pending::handle_pending_mode(app, code, modifiers),
         Mode::Command => modes::command_mode::handle_command_mode(app, code),
         Mode::Search => modes::search::handle_search_mode(app, code),
+        Mode::References => modes::references::handle_references_mode(app, code, modifiers),
+        Mode::CitationGraph => modes::citation_graph::handle_citation_graph_mode(app, code, modifiers),
+        Mode::FindDownload => modes::find_download::handle_find_download_mode(app, code, modifiers),
         _ => {
             if code == KeyCode::Esc {
                 app.mode = Mode::Normal;

@@ -38,11 +38,10 @@ pub trait MergeMetadata {
 impl MergeMetadata for BookCard {
     fn merge_metadata(&mut self, new_data: Metadata, source: MetadataSource, strategy: MergeStrategy) {
         // Title
-        if self.metadata.title.is_empty() || (strategy == MergeStrategy::HighestPriority && source == MetadataSource::UserManual) {
-            if !new_data.title.is_empty() {
+        if (self.metadata.title.is_empty() || (strategy == MergeStrategy::HighestPriority && source == MetadataSource::UserManual))
+            && !new_data.title.is_empty() {
                 self.metadata.title = new_data.title.clone();
             }
-        }
 
         // Authors (List)
         if !new_data.authors.is_empty() {
@@ -73,18 +72,16 @@ impl MergeMetadata for BookCard {
              if self.identifiers.is_none() {
                  self.identifiers = Some(Default::default());
              }
-             if let Some(ids) = &mut self.identifiers {
-                 if ids.doi.is_none() {
+             if let Some(ids) = &mut self.identifiers
+                 && ids.doi.is_none() {
                      ids.doi = Some(doi);
                  }
-             }
         }
         
-        if let Some(isbn) = new_data.isbn {
-             if !self.metadata.isbn.contains(&isbn) {
+        if let Some(isbn) = new_data.isbn
+             && !self.metadata.isbn.contains(&isbn) {
                  self.metadata.isbn.push(isbn);
              }
-        }
         
         if self.metadata.publisher.is_none() && new_data.publisher.is_some() {
             self.metadata.publisher = new_data.publisher;

@@ -37,16 +37,39 @@ pub fn run_tui(app: &mut App) -> Result<()> {
     let mut terminal = Terminal::new(backend)?;
     terminal.clear()?;
 
-    let event_handler = EventHandler::new(Duration::from_millis(250));
+    // Initialize tokio runtime for background tasks
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+
+    let (mut event_handler, event_tx) = EventHandler::new(Duration::from_millis(250));
+    app.event_tx = Some(event_tx);
 
     // Main loop
     loop {
         terminal.draw(|frame| ui::render(frame, app))?;
 
+        let _guard = rt.enter(); // Enter tokio context so tasks can be spawned inside sync functions if needed
+
         match event_handler.next()? {
             AppEvent::Key(key) => keys::handle_key(app, key.code, key.modifiers),
             AppEvent::Resize(_, _) => {}
             AppEvent::Tick => {}
+            AppEvent::AsyncResult(result) => {
+                // Handle async results
+                match result {
+                    crate::app::async_tasks::AsyncResultType::CitationGraphLoaded(res) => {
+                        if let Some(crate::app::OverlayState::CitationGraph(state)) = &mut app.active_overlay {
+                            state.handle_loaded(res);
+                        }
+                    }
+                    crate::app::async_tasks::AsyncResultType::FindDownloadResultsLoaded { column, results } => {
+                        if let Some(crate::app::OverlayState::FindDownload(state)) = &mut app.active_overlay {
+                            state.handle_loaded(column, results);
+                        }
+                    }
+                }
+            }
         }
 
         // Handle pending editor launch (requires terminal suspension)

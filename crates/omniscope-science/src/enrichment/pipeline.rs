@@ -77,8 +77,8 @@ impl EnrichmentPipeline {
         // 2. By Identifiers
         // DOI -> CrossRef + Unpaywall
         let doi_opt = card.identifiers.as_ref().and_then(|ids| ids.doi.clone());
-        if let Some(doi_str) = doi_opt {
-            if let Ok(doi) = Doi::parse(&doi_str) {
+        if let Some(doi_str) = doi_opt
+            && let Ok(doi) = Doi::parse(&doi_str) {
                 // CrossRef
                 report.steps.push("Querying CrossRef by DOI".to_string());
                 match self.crossref.fetch_by_doi(&doi).await {
@@ -101,23 +101,20 @@ impl EnrichmentPipeline {
                     Err(e) => report.errors.push(format!("Unpaywall error: {}", e)),
                 }
             }
-        }
 
         // ArXiv ID -> ArXiv API
         let arxiv_opt = card.identifiers.as_ref().and_then(|ids| ids.arxiv_id.clone());
-        if let Some(arxiv_str) = arxiv_opt {
-            if let Ok(arxiv_id) = ArxivId::parse(&arxiv_str) {
+        if let Some(arxiv_str) = arxiv_opt
+            && let Ok(arxiv_id) = ArxivId::parse(&arxiv_str) {
                 report.steps.push("Querying ArXiv API".to_string());
                 match self.arxiv_client.fetch_metadata(&arxiv_id).await {
                     Ok(meta) => {
-                        if let Some(doi) = &meta.doi {
-                             if let Some(ids) = &mut card.identifiers {
-                                 if ids.doi.is_none() {
+                        if let Some(doi) = &meta.doi
+                             && let Some(ids) = &mut card.identifiers
+                                 && ids.doi.is_none() {
                                      ids.doi = Some(doi.normalized.clone());
                                      report.fields_updated.push("doi".to_string());
                                  }
-                             }
-                        }
                         card.merge_metadata(meta.into_metadata(), MetadataSource::ArxivApi, MergeStrategy::Concat);
                         report.sources_used.push("ArxivApi".to_string());
                         report.fields_updated.push("metadata".to_string());
@@ -125,7 +122,6 @@ impl EnrichmentPipeline {
                     Err(e) => report.errors.push(format!("ArXiv error: {}", e)),
                 }
             }
-        }
         
         // ISBN -> OpenLibrary
         let isbns = card.metadata.isbn.clone();
@@ -165,12 +161,10 @@ impl EnrichmentPipeline {
                         if ids.semantic_scholar_id.is_none() {
                             ids.semantic_scholar_id = Some(paper.paper_id.clone());
                         }
-                        if let Some(pmid) = paper.external_ids.get("PubMed") {
-                            if ids.pmid.is_none() { ids.pmid = Some(pmid.clone()); }
-                        }
-                        if let Some(mag) = paper.external_ids.get("MAG") {
-                            if ids.mag_id.is_none() { ids.mag_id = Some(mag.clone()); }
-                        }
+                        if let Some(pmid) = paper.external_ids.get("PubMed")
+                            && ids.pmid.is_none() { ids.pmid = Some(pmid.clone()); }
+                        if let Some(mag) = paper.external_ids.get("MAG")
+                            && ids.mag_id.is_none() { ids.mag_id = Some(mag.clone()); }
                     }
 
                     if let Some(cc) = paper.citation_count {
@@ -280,8 +274,10 @@ mod tests {
         let pipeline = EnrichmentPipeline::new(crossref, s2, openalex, unpaywall, openlibrary, arxiv_client);
 
         let mut card = BookCard::new("");
-        let mut ids = ScientificIdentifiers::default();
-        ids.doi = Some(test_doi.to_string());
+        let ids = ScientificIdentifiers {
+            doi: Some(test_doi.to_string()),
+            ..Default::default()
+        };
         card.identifiers = Some(ids);
 
         let report = pipeline.enrich(&mut card).await;

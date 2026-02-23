@@ -1961,6 +1961,7 @@ dependencies = [
  "crossterm",
  "dirs",
  "omniscope-core",
+ "omniscope-science",
  "ratatui",
  "regex",
  "tempfile",

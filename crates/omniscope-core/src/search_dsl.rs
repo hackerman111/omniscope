@@ -251,7 +251,7 @@ fn parse_rating_filter(s: &str) -> Option<CompareOp> {
         return rest.parse().ok().map(CompareOp::Lt);
     }
     // Plain number: treat as >=
-    s.parse().ok().map(|v| CompareOp::Gte(v))
+    s.parse().ok().map(CompareOp::Gte)
 }
 
 fn filter_matches(filter: &SearchFilter, book: &BookSummaryView) -> bool {

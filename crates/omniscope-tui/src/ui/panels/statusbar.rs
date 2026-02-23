@@ -73,6 +73,9 @@ fn render_mode_zone(frame: &mut Frame, app: &App, area: Rect) {
         Mode::Command => (" COMMAND ", app.theme.frost_blue(), app.theme.fg_white()),
         Mode::Search => (" SEARCH ", app.theme.yellow(), app.theme.bg()),
         Mode::Pending => (" PENDING ", app.theme.muted(), app.theme.fg_bright()),
+        Mode::References => (" REFERENCES ", app.theme.purple(), app.theme.bg()),
+        Mode::CitationGraph => (" CITATION GRAPH ", app.theme.frost_mint(), app.theme.bg()),
+        Mode::FindDownload => (" FIND & DOWNLOAD ", app.theme.frost_mint(), app.theme.bg()),
     };
 
     let content = Line::from(Span::styled(

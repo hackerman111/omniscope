@@ -281,11 +281,10 @@ impl<'a> BookRepository for SqliteBookRepository<'a> {
 
         let mut cards = Vec::new();
         for id_result in rows {
-            if let Ok(id) = id_result {
-                if let Ok(Some(card)) = self.find_by_id(&id) {
+            if let Ok(id) = id_result
+                && let Ok(Some(card)) = self.find_by_id(&id) {
                     cards.push(card);
                 }
-            }
         }
         Ok(cards)
     }

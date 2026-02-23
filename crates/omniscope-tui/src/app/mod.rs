@@ -1,7 +1,17 @@
 mod books;
 mod navigation;
+pub mod references;
+pub mod citation_graph;
+pub mod find_download;
+pub mod async_tasks;
 mod sidebar;
 mod vim;
+
+pub enum OverlayState {
+    References(references::ReferencesPanelState),
+    CitationGraph(citation_graph::CitationGraphPanelState),
+    FindDownload(find_download::FindDownloadPanelState),
+}
 
 use crate::keys::core::operator::Operator;
 use crate::keys::ext::jump_list::JumpList;
@@ -30,6 +40,9 @@ pub enum Mode {
     VisualLine,
     VisualBlock,
     Pending,
+    References,
+    CitationGraph,
+    FindDownload,
 }
 
 impl std::fmt::Display for Mode {
@@ -43,6 +56,9 @@ impl std::fmt::Display for Mode {
             Self::VisualLine => write!(f, "VISUAL-LINE"),
             Self::VisualBlock => write!(f, "VISUAL-BLOCK"),
             Self::Pending => write!(f, "PENDING"),
+            Self::References => write!(f, "REFERENCES"),
+            Self::CitationGraph => write!(f, "CITATION-GRAPH"),
+            Self::FindDownload => write!(f, "FIND-DOWNLOAD"),
         }
     }
 }
@@ -272,6 +288,12 @@ pub struct App {
 
     /// Path to open in $EDITOR (requires terminal suspension, handled by main loop).
     pub pending_editor_path: Option<String>,
+
+    /// Active over-the-main-UI panel state (References, Citation Graph, etc.).
+    pub active_overlay: Option<OverlayState>,
+
+    /// Channel for sending async events back to the main loop.
+    pub event_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::event::AppEvent>>,
 }
 
 impl App {
@@ -366,6 +388,8 @@ impl App {
             theme: NordTheme::default(),
             clipboard: arboard::Clipboard::new().ok(),
             pending_editor_path: None,
+            active_overlay: None,
+            event_tx: None,
         };
 
         app.refresh_sidebar();

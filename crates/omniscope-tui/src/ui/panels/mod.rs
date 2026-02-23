@@ -3,6 +3,9 @@ pub mod center;
 pub mod cmdline;
 pub mod left;
 pub mod quickfix;
+pub mod references;
+pub mod citation_graph;
+pub mod find_download;
 pub mod right;
 pub mod statusbar;
 
@@ -24,6 +27,22 @@ pub fn render_body(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         area
     };
+
+    match app.mode {
+        crate::app::Mode::References => {
+            references::render(frame, app, body_area);
+            return;
+        }
+        crate::app::Mode::CitationGraph => {
+            citation_graph::render(frame, app, body_area);
+            return;
+        }
+        crate::app::Mode::FindDownload => {
+            find_download::render(frame, app, body_area);
+            return;
+        }
+        _ => {}
+    }
 
     let (left_area, center_area, right_area) = super::layout::LayoutManager::split_main(body_area);
 

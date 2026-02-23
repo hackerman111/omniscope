@@ -55,11 +55,10 @@ pub fn generate_ris(card: &BookCard) -> String {
     }
     
     // Identifiers
-    if let Some(ids) = &card.identifiers {
-        if let Some(doi) = &ids.doi {
+    if let Some(ids) = &card.identifiers
+        && let Some(doi) = &ids.doi {
             ris.push_str(&format!("DO  - {}\n", doi));
         }
-    }
     
     for isbn in &card.metadata.isbn {
         ris.push_str(&format!("SN  - {}\n", isbn));

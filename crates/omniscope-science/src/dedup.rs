@@ -26,8 +26,8 @@ impl DuplicateFinder {
         let mut groups: HashMap<String, Vec<&BookCard>> = HashMap::new();
 
         for book in books {
-            if let Some(ids) = &book.identifiers {
-                if let Some(doi) = &ids.doi {
+            if let Some(ids) = &book.identifiers
+                && let Some(doi) = &ids.doi {
                     let normalized = crate::identifiers::doi::Doi::parse(doi)
                         .map(|d| d.normalized)
                         .unwrap_or_else(|_| doi.clone());
@@ -36,7 +36,6 @@ impl DuplicateFinder {
                         .or_default()
                         .push(book);
                 }
-            }
         }
 
         Self::build_groups(groups, DedupStrategy::ByDoi)
