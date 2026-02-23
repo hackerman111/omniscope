@@ -1,12 +1,12 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use reqwest::header::{HeaderMap, RETRY_AFTER};
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use tokio::sync::Mutex;
 use tokio::time::sleep;
 
@@ -112,7 +112,10 @@ impl RateLimitedClient {
         if !resp.status().is_success() {
             let status = resp.status().as_u16();
             let msg = resp.text().await.unwrap_or_default();
-            return Err(ScienceError::ApiError(url.to_string(), format!("HTTP {status}: {msg}")));
+            return Err(ScienceError::ApiError(
+                url.to_string(),
+                format!("HTTP {status}: {msg}"),
+            ));
         }
         let text = resp.text().await.map_err(ScienceError::Http)?;
         serde_json::from_str(&text).map_err(|e| ScienceError::Parse(e.to_string()))
@@ -126,7 +129,7 @@ pub struct DiskCache {
     ttl: Duration,
 }
 
-fn cache_key_to_path(dir: &PathBuf, key: &str) -> PathBuf {
+fn cache_key_to_path(dir: &Path, key: &str) -> PathBuf {
     let mut hasher = DefaultHasher::new();
     key.hash(&mut hasher);
     let hash = hasher.finish();
@@ -171,7 +174,10 @@ impl DiskCache {
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        let entry = CacheEntry { stored_at: now, value };
+        let entry = CacheEntry {
+            stored_at: now,
+            value,
+        };
         if let Ok(data) = serde_json::to_vec(&entry) {
             let _ = tokio::fs::write(&path, data).await;
         }

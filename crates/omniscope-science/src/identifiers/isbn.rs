@@ -10,29 +10,41 @@ pub struct Isbn {
 }
 
 fn strip_isbn(input: &str) -> String {
-    input.chars().filter(|c| c.is_ascii_alphanumeric()).collect::<String>().to_uppercase()
+    input
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .collect::<String>()
+        .to_uppercase()
 }
 
 fn check_isbn10(digits: &[u8]) -> bool {
     // digits[9] may be 10 (X)
-    let sum: u32 = digits.iter().enumerate().map(|(i, &d)| (10 - i as u32) * d as u32).sum();
-    sum % 11 == 0
+    let sum: u32 = digits
+        .iter()
+        .enumerate()
+        .map(|(i, &d)| (10 - i as u32) * d as u32)
+        .sum();
+    sum.is_multiple_of(11)
 }
 
 fn check_isbn13(digits: &[u8]) -> bool {
-    let sum: u32 = digits.iter().enumerate().map(|(i, &d)| {
-        if i % 2 == 0 { d as u32 } else { d as u32 * 3 }
-    }).sum();
-    sum % 10 == 0
+    let sum: u32 = digits
+        .iter()
+        .enumerate()
+        .map(|(i, &d)| if i % 2 == 0 { d as u32 } else { d as u32 * 3 })
+        .sum();
+    sum.is_multiple_of(10)
 }
 
 fn isbn10_to_isbn13(digits10: &[u8]) -> String {
     let mut d13: Vec<u8> = vec![9, 7, 8];
     d13.extend_from_slice(&digits10[..9]);
     // compute check digit
-    let sum: u32 = d13.iter().enumerate().map(|(i, &d)| {
-        if i % 2 == 0 { d as u32 } else { d as u32 * 3 }
-    }).sum();
+    let sum: u32 = d13
+        .iter()
+        .enumerate()
+        .map(|(i, &d)| if i % 2 == 0 { d as u32 } else { d as u32 * 3 })
+        .sum();
     let check = (10 - (sum % 10)) % 10;
     d13.push(check as u8);
     d13.iter().map(|d| d.to_string()).collect()
@@ -43,7 +55,14 @@ fn format_isbn13(s: &str) -> String {
     // Standard: prefix(3)-group-publisher-title-check(1)
     // For simplicity, use 978-X-XXXX-XXXX-X grouping
     if s.len() == 13 {
-        format!("{}-{}-{}-{}-{}", &s[0..3], &s[3..4], &s[4..8], &s[8..12], &s[12..13])
+        format!(
+            "{}-{}-{}-{}-{}",
+            &s[0..3],
+            &s[3..4],
+            &s[4..8],
+            &s[8..12],
+            &s[12..13]
+        )
     } else {
         s.to_string()
     }
@@ -67,9 +86,17 @@ impl Isbn {
             let isbn10 = if stripped.starts_with("978") {
                 let d9: Vec<u8> = digits[3..12].to_vec();
                 // compute isbn10 check digit
-                let sum: u32 = d9.iter().enumerate().map(|(i, &d)| (9 - i as u32) * d as u32).sum();
+                let sum: u32 = d9
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &d)| (9 - i as u32) * d as u32)
+                    .sum();
                 let check = sum % 11;
-                let check_char = if check == 10 { 'X' } else { (b'0' + check as u8) as char };
+                let check_char = if check == 10 {
+                    'X'
+                } else {
+                    (b'0' + check as u8) as char
+                };
                 let mut s: String = d9.iter().map(|d| d.to_string()).collect();
                 s.push(check_char);
                 Some(s)
@@ -77,7 +104,12 @@ impl Isbn {
                 None
             };
             let formatted = format_isbn13(&isbn13);
-            return Ok(Self { raw: input.to_string(), isbn13, isbn10, formatted });
+            return Ok(Self {
+                raw: input.to_string(),
+                isbn13,
+                isbn10,
+                formatted,
+            });
         }
 
         if stripped.len() == 10 {
@@ -98,7 +130,12 @@ impl Isbn {
             let isbn10: String = stripped.clone();
             let isbn13 = isbn10_to_isbn13(&digits);
             let formatted = format_isbn13(&isbn13);
-            return Ok(Self { raw: input.to_string(), isbn13, isbn10: Some(isbn10), formatted });
+            return Ok(Self {
+                raw: input.to_string(),
+                isbn13,
+                isbn10: Some(isbn10),
+                formatted,
+            });
         }
 
         Err(ScienceError::InvalidIsbn(input.to_string()))
