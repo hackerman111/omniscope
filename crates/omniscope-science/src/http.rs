@@ -51,6 +51,10 @@ impl RateLimitedClient {
         self.get_with_headers(url, HeaderMap::new()).await
     }
 
+    pub async fn get_bytes(&self, url: &str) -> Result<Vec<u8>> {
+        self.get_bytes_with_headers(url, HeaderMap::new()).await
+    }
+
     pub async fn get_with_headers(&self, url: &str, headers: HeaderMap) -> Result<String> {
         let mut attempt = 0u32;
         loop {
@@ -79,6 +83,49 @@ impl RateLimitedClient {
                     ));
                 }
                 Ok(r) => return r.text().await.map_err(ScienceError::Http),
+                Err(e) => {
+                    if attempt >= self.max_retries {
+                        return Err(ScienceError::Http(e));
+                    }
+                    let backoff = 2u64.pow(attempt);
+                    sleep(Duration::from_secs(backoff)).await;
+                    attempt += 1;
+                }
+            }
+        }
+    }
+
+    pub async fn get_bytes_with_headers(&self, url: &str, headers: HeaderMap) -> Result<Vec<u8>> {
+        let mut attempt = 0u32;
+        loop {
+            self.wait_for_rate_limit().await;
+            let resp = self.client.get(url).headers(headers.clone()).send().await;
+            match resp {
+                Ok(r) if r.status() == 429 => {
+                    if attempt >= self.max_retries {
+                        return Err(ScienceError::RateLimit("server".to_string(), 60));
+                    }
+                    let wait = r
+                        .headers()
+                        .get(RETRY_AFTER)
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(|s| s.parse::<u64>().ok())
+                        .unwrap_or(60);
+                    sleep(Duration::from_secs(wait)).await;
+                    attempt += 1;
+                }
+                Ok(r) if !r.status().is_success() => {
+                    let status = r.status().as_u16();
+                    let body = r.text().await.unwrap_or_default();
+                    return Err(ScienceError::ApiError(
+                        url.to_string(),
+                        format!("HTTP {status}: {body}"),
+                    ));
+                }
+                Ok(r) => {
+                    let bytes = r.bytes().await.map_err(ScienceError::Http)?;
+                    return Ok(bytes.to_vec());
+                }
                 Err(e) => {
                     if attempt >= self.max_retries {
                         return Err(ScienceError::Http(e));
