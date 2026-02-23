@@ -52,7 +52,8 @@ impl<'a> Repository for SqliteTagRepository<'a> {
 impl<'a> TagRepository for SqliteTagRepository<'a> {
     fn list(&self) -> Result<Vec<(String, u32)>> {
         let mut stmt = self.conn.prepare("SELECT tags FROM books")?;
-        let mut tag_counts: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+        let mut tag_counts: std::collections::HashMap<String, u32> =
+            std::collections::HashMap::new();
 
         let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
         for row in rows {

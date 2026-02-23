@@ -86,6 +86,10 @@ pub fn handle_at_science_command(app: &mut App, code: char) -> bool {
             app.trigger_ai_enrich_metadata();
             true
         }
+        'm' => {
+            app.trigger_metadata_enrich();
+            true
+        }
         'r' => {
             app.trigger_ai_extract_references();
             true

@@ -1,4 +1,4 @@
-use super::{parse_command, CommandAction};
+use super::{CommandAction, parse_command};
 use crate::app::App;
 use crate::panels::citation_graph::GraphMode;
 

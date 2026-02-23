@@ -247,6 +247,11 @@ fn append_metrics_lines(
     let references = reference_count(card);
     let delta_last_month = citation_delta_last_month(card);
     let fields = fields_of_study(card);
+    let pages = card
+        .metadata
+        .pages
+        .map(|value| format_count(value))
+        .unwrap_or_else(|| "—".to_string());
 
     lines.push(styled_line(
         format!(
@@ -263,6 +268,11 @@ fn append_metrics_lines(
             format_count(influential),
             format_count(references)
         ),
+        Style::default().fg(theme.fg()),
+        width,
+    ));
+    lines.push(styled_line(
+        format!("  Pages: {pages}"),
         Style::default().fg(theme.fg()),
         width,
     ));
@@ -601,8 +611,9 @@ mod tests {
         assert!(lines.iter().any(|line| line.contains("METRICS")));
         assert!(lines.iter().any(|line| line.contains("OPEN ACCESS")));
         assert!(lines.iter().any(|line| line.contains("TL;DR")));
-        assert!(lines.iter().any(|line| line
-            .contains("[o]pen  [r]eferences  [c]itations  [e]xport BibTeX  [ai]  [f]ind")));
+        assert!(lines.iter().any(|line| {
+            line.contains("[o]pen  [r]eferences  [c]itations  [e]xport BibTeX  [ai]  [f]ind")
+        }));
     }
 
     #[test]
@@ -613,12 +624,16 @@ mod tests {
             .map(|line| line_text(&line))
             .collect::<Vec<_>>();
 
-        assert!(lines
-            .iter()
-            .any(|line| line.contains("10.48550/arXiv.1706.03762  [↗ open]")));
-        assert!(lines
-            .iter()
-            .any(|line| line.contains("1706.03762v5  [↗ abs] [↗ pdf]")));
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("10.48550/arXiv.1706.03762  [↗ open]"))
+        );
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("1706.03762v5  [↗ abs] [↗ pdf]"))
+        );
         assert!(lines.iter().any(|line| line.contains("S2:")));
         assert!(lines.iter().any(|line| line.contains("OpenAlex:")));
     }
@@ -639,9 +654,11 @@ mod tests {
             .into_iter()
             .map(|line| line_text(&line))
             .collect::<Vec<_>>();
-        assert!(text_lines
-            .iter()
-            .any(|line| line.contains("https://arxiv.org/pdf/1706.03762  [★ Best]")));
+        assert!(
+            text_lines
+                .iter()
+                .any(|line| line.contains("https://arxiv.org/pdf/1706.03762  [★ Best]"))
+        );
     }
 
     #[test]

@@ -3,11 +3,11 @@ pub(crate) mod overlays;
 pub(crate) mod panels;
 pub(crate) mod popups;
 
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
-use ratatui::Frame;
 
 use crate::app::{App, Mode};
 

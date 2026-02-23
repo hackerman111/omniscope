@@ -7,8 +7,8 @@ pub mod right;
 pub mod statusbar;
 
 use crate::app::App;
-use ratatui::layout::Rect;
 use ratatui::Frame;
+use ratatui::layout::Rect;
 
 pub fn render_body(frame: &mut Frame, app: &App, area: Rect) {
     let body_area = if app.quickfix_show {

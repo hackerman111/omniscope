@@ -38,7 +38,12 @@ impl FuzzySearcher {
                 .collect();
         }
 
-        let pattern = Pattern::new(query, CaseMatching::Ignore, Normalization::Smart, AtomKind::Fuzzy);
+        let pattern = Pattern::new(
+            query,
+            CaseMatching::Ignore,
+            Normalization::Smart,
+            AtomKind::Fuzzy,
+        );
         let mut buf = Vec::new();
         let mut results: Vec<SearchResult> = Vec::new();
 
@@ -118,13 +123,18 @@ mod tests {
 
     #[test]
     fn test_fuzzy_search_typo() {
-        let books = vec![
-            make_summary("The Rust Programming Language", &["Klabnik"], &["rust"]),
-        ];
+        let books = vec![make_summary(
+            "The Rust Programming Language",
+            &["Klabnik"],
+            &["rust"],
+        )];
 
         let mut searcher = FuzzySearcher::new();
         let results = searcher.search("rut prog", &books);
-        assert!(!results.is_empty(), "fuzzy should match 'rut prog' -> 'Rust Programming'");
+        assert!(
+            !results.is_empty(),
+            "fuzzy should match 'rut prog' -> 'Rust Programming'"
+        );
     }
 
     #[test]

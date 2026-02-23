@@ -1,7 +1,7 @@
 use crate::app::{App, Mode};
 use crate::keys::core::motions;
-use crate::keys::core::operator::execute_operator;
 use crate::keys::core::operator::Operator;
+use crate::keys::core::operator::execute_operator;
 use crate::keys::core::text_objects::{self, TextObjectKind};
 use crate::keys::ext::find_char;
 use crate::keys::ext::science_bindings;

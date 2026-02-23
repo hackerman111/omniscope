@@ -1,6 +1,6 @@
-use crossterm::event::KeyCode;
 use crate::app::App;
-use crate::popup::{Popup, EasyMotionState};
+use crate::popup::{EasyMotionState, Popup};
+use crossterm::event::KeyCode;
 
 pub fn handle_easy_motion_start(app: &mut App, code: KeyCode) {
     if app.books.is_empty() {
@@ -14,14 +14,14 @@ pub fn handle_easy_motion_start(app: &mut App, code: KeyCode) {
             let mut targets = Vec::new();
             let start = app.selected_index.saturating_sub(26);
             let end = (app.selected_index + 26).min(app.books.len());
-            
+
             let chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
             for (i, idx) in (start..end).enumerate() {
                 if i < chars.len() {
                     targets.push((chars.chars().nth(i).unwrap(), idx));
                 }
             }
-            
+
             app.popup = Some(Popup::EasyMotion(EasyMotionState {
                 pending: false,
                 targets,
@@ -33,14 +33,14 @@ pub fn handle_easy_motion_start(app: &mut App, code: KeyCode) {
             let mut targets = Vec::new();
             let start = app.selected_index;
             let end = (app.selected_index + 52).min(app.books.len());
-            
+
             let chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
             for (i, idx) in (start..end).enumerate() {
                 if i < chars.len() {
                     targets.push((chars.chars().nth(i).unwrap(), idx));
                 }
             }
-            
+
             app.popup = Some(Popup::EasyMotion(EasyMotionState {
                 pending: false,
                 targets,
@@ -52,14 +52,14 @@ pub fn handle_easy_motion_start(app: &mut App, code: KeyCode) {
             let mut targets = Vec::new();
             let start = app.selected_index.saturating_sub(52);
             let end = app.selected_index;
-            
+
             let chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
             for (i, idx) in (start..end).rev().enumerate() {
                 if i < chars.len() {
                     targets.push((chars.chars().nth(i).unwrap(), idx));
                 }
             }
-            
+
             app.popup = Some(Popup::EasyMotion(EasyMotionState {
                 pending: false,
                 targets,
@@ -69,7 +69,7 @@ pub fn handle_easy_motion_start(app: &mut App, code: KeyCode) {
         KeyCode::Char('/') => {
             // Space / - EasyMotion by first letter: enter pending mode to prompt for a char
             app.popup = Some(Popup::EasyMotion(EasyMotionState {
-                pending: true,  // Waiting for a character to filter by
+                pending: true, // Waiting for a character to filter by
                 targets: Vec::new(),
             }));
             app.status_message = "EasyMotion: type first letter of title".to_string();
@@ -85,10 +85,10 @@ pub fn handle_easy_motion_start(app: &mut App, code: KeyCode) {
 pub fn build_easy_motion_targets_by_char(app: &App, filter_char: char) -> Vec<(char, usize)> {
     let filter_lower = filter_char.to_lowercase().next().unwrap_or(filter_char);
     let chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    
+
     let mut targets = Vec::new();
     let mut label_idx = 0;
-    
+
     for (idx, book) in app.books.iter().enumerate() {
         if book.title.to_lowercase().starts_with(filter_lower) {
             if label_idx < chars.len() {
@@ -97,6 +97,6 @@ pub fn build_easy_motion_targets_by_char(app: &App, filter_char: char) -> Vec<(c
             }
         }
     }
-    
+
     targets
 }

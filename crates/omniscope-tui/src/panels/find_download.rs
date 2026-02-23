@@ -1,9 +1,9 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
-use ratatui::Frame;
 
 use crate::theme::NordTheme;
 
@@ -945,12 +945,15 @@ mod tests {
         assert!(left.iter().any(|line| line.contains("Anna's Archive (1)")));
         assert!(left.iter().any(|line| line.contains("PDF 1.2MB")));
         assert!(left.iter().any(|line| line.contains("✓ In library")));
-        assert!(left
-            .iter()
-            .any(|line| line.contains("[D]ownload [M]eta [↗]open")));
-        assert!(right
-            .iter()
-            .any(|line| line.contains("Semantic Scholar (1)")));
+        assert!(
+            left.iter()
+                .any(|line| line.contains("[D]ownload [M]eta [↗]open"))
+        );
+        assert!(
+            right
+                .iter()
+                .any(|line| line.contains("Semantic Scholar (1)"))
+        );
         assert!(right.iter().any(|line| line.contains("87,654 citations")));
     }
 

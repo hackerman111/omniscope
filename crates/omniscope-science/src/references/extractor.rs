@@ -1,8 +1,12 @@
 use std::collections::HashMap;
+use std::fs;
 use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
+use std::thread;
+use std::time::{Duration, Instant};
 
+use lopdf::Document;
 use omniscope_core::models::{BookCard, FileFormat};
 use uuid::Uuid;
 
@@ -30,31 +34,24 @@ struct PdftotextExtractor;
 
 impl PdfTextExtractor for PdftotextExtractor {
     fn extract_text(&self, pdf_path: &Path) -> Result<String> {
-        let output = Command::new("pdftotext")
-            .arg(pdf_path)
-            .arg("-")
-            .output()
-            .map_err(|e| {
-                if e.kind() == std::io::ErrorKind::NotFound {
-                    ScienceError::PdfExtraction("pdftotext is not installed".to_string())
-                } else {
-                    ScienceError::PdfExtraction(format!("failed to run pdftotext: {e}"))
-                }
-            })?;
+        let lopdf_error = match extract_pdf_text_with_lopdf(pdf_path) {
+            Ok(text) if !text.trim().is_empty() => return Ok(text),
+            Ok(_) => Some("lopdf extracted empty text".to_string()),
+            Err(err) => Some(err.to_string()),
+        };
 
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            let message = if stderr.is_empty() {
-                "pdftotext failed without stderr output".to_string()
-            } else {
-                format!("pdftotext failed: {stderr}")
-            };
-            return Err(ScienceError::PdfExtraction(message));
+        match extract_pdf_text_with_pdftotext(pdf_path) {
+            Ok(text) if !text.trim().is_empty() => Ok(text),
+            Ok(_) => Err(ScienceError::PdfExtraction(
+                "pdftotext extracted empty text".to_string(),
+            )),
+            Err(pdftotext_error) => {
+                let prefix = lopdf_error.unwrap_or_else(|| "lopdf extraction failed".to_string());
+                Err(ScienceError::PdfExtraction(format!(
+                    "{prefix}; {pdftotext_error}"
+                )))
+            }
         }
-
-        String::from_utf8(output.stdout).map_err(|e| {
-            ScienceError::PdfExtraction(format!("pdftotext returned non-UTF8 output: {e}"))
-        })
     }
 }
 
@@ -74,6 +71,41 @@ impl ReferenceExtractor {
             library_lookup: None,
             pdf_text_extractor: Arc::new(PdftotextExtractor),
         }
+    }
+
+    pub fn from_env() -> Self {
+        let polite_email = env_first([
+            "OMNISCOPE_POLITE_EMAIL",
+            "POLITE_POOL_EMAIL",
+            "OMNISCOPE_CROSSREF_EMAIL",
+        ]);
+        let semantic_scholar_key = env_first([
+            "OMNISCOPE_SEMANTIC_SCHOLAR_API_KEY",
+            "SEMANTIC_SCHOLAR_API_KEY",
+        ]);
+
+        Self::new(
+            Arc::new(CrossRefSource::new(polite_email)),
+            Arc::new(SemanticScholarSource::new(semantic_scholar_key)),
+        )
+    }
+
+    pub fn extract_blocking(&self, card: &BookCard) -> Result<Vec<ExtractedReference>> {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|err| {
+                ScienceError::Parse(format!(
+                    "failed to start async runtime for references: {err}"
+                ))
+            })?;
+        runtime.block_on(async { self.extract(card).await })
+    }
+
+    pub fn extract_with_default_sources_blocking(
+        card: &BookCard,
+    ) -> Result<Vec<ExtractedReference>> {
+        Self::from_env().extract_blocking(card)
     }
 
     pub fn with_library_lookup(mut self, lookup: Arc<dyn LibraryLookup>) -> Self {
@@ -245,6 +277,98 @@ fn normalized_arxiv_key(arxiv_id: &ArxivId) -> String {
         Some(version) => format!("{}v{version}", arxiv_id.id),
         None => arxiv_id.id.clone(),
     }
+}
+
+fn extract_pdf_text_with_lopdf(pdf_path: &Path) -> Result<String> {
+    let document = Document::load(pdf_path).map_err(|err| {
+        ScienceError::PdfExtraction(format!(
+            "lopdf failed to open {}: {err}",
+            pdf_path.display()
+        ))
+    })?;
+
+    let pages = document.get_pages();
+    if pages.is_empty() {
+        return Ok(String::new());
+    }
+    let page_numbers = pages.keys().copied().collect::<Vec<u32>>();
+
+    document.extract_text(&page_numbers).map_err(|err| {
+        ScienceError::PdfExtraction(format!(
+            "lopdf failed to extract text from {}: {err}",
+            pdf_path.display()
+        ))
+    })
+}
+
+fn extract_pdf_text_with_pdftotext(pdf_path: &Path) -> Result<String> {
+    let output_path = std::env::temp_dir().join(format!(
+        "omniscope_refs_pdftotext_{}_{}.txt",
+        std::process::id(),
+        Uuid::now_v7()
+    ));
+
+    let mut child = Command::new("pdftotext")
+        .arg(pdf_path)
+        .arg(&output_path)
+        .spawn()
+        .map_err(|err| {
+            if err.kind() == std::io::ErrorKind::NotFound {
+                ScienceError::PdfExtraction("pdftotext is not installed".to_string())
+            } else {
+                ScienceError::PdfExtraction(format!("failed to run pdftotext: {err}"))
+            }
+        })?;
+
+    let timeout = Duration::from_secs(20);
+    let started = Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {
+                if started.elapsed() >= timeout {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    let _ = fs::remove_file(&output_path);
+                    return Err(ScienceError::PdfExtraction(
+                        "pdftotext timed out while extracting references".to_string(),
+                    ));
+                }
+                thread::sleep(Duration::from_millis(75));
+            }
+            Err(err) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = fs::remove_file(&output_path);
+                return Err(ScienceError::PdfExtraction(format!(
+                    "pdftotext process failed: {err}"
+                )));
+            }
+        }
+    };
+
+    if !status.success() {
+        let _ = fs::remove_file(&output_path);
+        return Err(ScienceError::PdfExtraction(format!(
+            "pdftotext exited with status {status}"
+        )));
+    }
+
+    let text = fs::read_to_string(&output_path).map_err(|err| {
+        ScienceError::PdfExtraction(format!(
+            "failed to read pdftotext output {}: {err}",
+            output_path.display()
+        ))
+    })?;
+    let _ = fs::remove_file(&output_path);
+    Ok(text)
+}
+
+fn env_first<const N: usize>(keys: [&str; N]) -> Option<String> {
+    keys.into_iter()
+        .find_map(|key| std::env::var(key).ok())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }
 
 #[cfg(test)]

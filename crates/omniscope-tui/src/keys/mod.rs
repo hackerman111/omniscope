@@ -1,12 +1,12 @@
-pub mod modes;
 pub mod core;
 pub mod ext;
-pub mod ui;
+pub mod modes;
 #[cfg(test)]
 pub mod tests;
+pub mod ui;
 
-use crossterm::event::{KeyCode, KeyModifiers};
 use crate::app::{App, Mode};
+use crossterm::event::{KeyCode, KeyModifiers};
 
 pub(crate) fn handle_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
     // Record macro events (before any handling, except for the 'q' that stops recording)
@@ -29,7 +29,11 @@ pub(crate) fn handle_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) 
     }
 
     // Handle register selection
-    if app.mode != Mode::Insert && app.mode != Mode::Command && app.mode != Mode::Search && app.pending_register_select {
+    if app.mode != Mode::Insert
+        && app.mode != Mode::Command
+        && app.mode != Mode::Search
+        && app.pending_register_select
+    {
         if let KeyCode::Char(c) = code {
             app.vim_register = Some(c);
             app.pending_register_select = false;
@@ -41,7 +45,9 @@ pub(crate) fn handle_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) 
 
     match app.mode {
         Mode::Normal => modes::normal::handle_normal_mode(app, code, modifiers),
-        Mode::Visual | Mode::VisualLine | Mode::VisualBlock => modes::visual::handle_visual_mode(app, code, modifiers),
+        Mode::Visual | Mode::VisualLine | Mode::VisualBlock => {
+            modes::visual::handle_visual_mode(app, code, modifiers)
+        }
         Mode::Pending => modes::pending::handle_pending_mode(app, code, modifiers),
         Mode::Command => modes::command_mode::handle_command_mode(app, code),
         Mode::Search => modes::search::handle_search_mode(app, code),

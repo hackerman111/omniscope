@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use std::str::FromStr;
 use std::sync::MutexGuard;
 use uuid::Uuid;
@@ -74,9 +74,11 @@ impl<'a> Repository for SqliteBookRepository<'a> {
 
                         let mut card = BookCard::new(row.get::<_, String>(1)?);
                         card.id = *id;
-                        card.metadata.authors = serde_json::from_str(&authors_str).unwrap_or_default();
+                        card.metadata.authors =
+                            serde_json::from_str(&authors_str).unwrap_or_default();
                         card.metadata.year = row.get(3)?;
-                        card.metadata.isbn = row.get::<_, Option<String>>(4)?
+                        card.metadata.isbn = row
+                            .get::<_, Option<String>>(4)?
                             .map(|s| vec![s])
                             .unwrap_or_default();
                         card.identifiers = Some(crate::models::ScientificIdentifiers {
@@ -84,13 +86,18 @@ impl<'a> Repository for SqliteBookRepository<'a> {
                             arxiv_id: row.get(6)?,
                             ..Default::default()
                         });
-                        card.organization.tags = serde_json::from_str(&tags_str).unwrap_or_default();
-                        card.organization.libraries = serde_json::from_str(&libraries_str).unwrap_or_default();
-                        card.organization.folders = serde_json::from_str(&folders_str).unwrap_or_default();
-                        card.organization.read_status = ReadStatus::from_str(&row.get::<_, String>(12)?).unwrap_or_default();
+                        card.organization.tags =
+                            serde_json::from_str(&tags_str).unwrap_or_default();
+                        card.organization.libraries =
+                            serde_json::from_str(&libraries_str).unwrap_or_default();
+                        card.organization.folders =
+                            serde_json::from_str(&folders_str).unwrap_or_default();
+                        card.organization.read_status =
+                            ReadStatus::from_str(&row.get::<_, String>(12)?).unwrap_or_default();
                         card.organization.rating = row.get(13)?;
                         card.ai.summary = row.get(14)?;
-                        card.ai.key_topics = serde_json::from_str(&key_topics_str).unwrap_or_default();
+                        card.ai.key_topics =
+                            serde_json::from_str(&key_topics_str).unwrap_or_default();
                         Ok(card)
                     })
                     .ok();
@@ -110,7 +117,10 @@ impl<'a> Repository for SqliteBookRepository<'a> {
         let key_topics_json = serde_json::to_string(&card.ai.key_topics)?;
 
         let doi = card.identifiers.as_ref().and_then(|i| i.doi.as_deref());
-        let arxiv_id = card.identifiers.as_ref().and_then(|i| i.arxiv_id.as_deref());
+        let arxiv_id = card
+            .identifiers
+            .as_ref()
+            .and_then(|i| i.arxiv_id.as_deref());
 
         self.conn.execute(
             "INSERT OR REPLACE INTO books
@@ -150,7 +160,9 @@ impl<'a> Repository for SqliteBookRepository<'a> {
     }
 
     fn delete(&self, id: &Self::Id) -> Result<bool> {
-        let deleted = self.conn.execute("DELETE FROM books WHERE id = ?1", params![id.to_string()])?;
+        let deleted = self
+            .conn
+            .execute("DELETE FROM books WHERE id = ?1", params![id.to_string()])?;
         Ok(deleted > 0)
     }
 }
@@ -165,7 +177,9 @@ impl<'a> BookRepository for SqliteBookRepository<'a> {
 
         stmt.query_row(params![id.to_string()], Self::row_to_summary)
             .map_err(|e| match e {
-                rusqlite::Error::QueryReturnedNoRows => OmniscopeError::BookNotFound(id.to_string()),
+                rusqlite::Error::QueryReturnedNoRows => {
+                    OmniscopeError::BookNotFound(id.to_string())
+                }
                 other => OmniscopeError::Database(other),
             })
     }
@@ -185,7 +199,9 @@ impl<'a> BookRepository for SqliteBookRepository<'a> {
     }
 
     fn count(&self) -> Result<usize> {
-        let count: i64 = self.conn.query_row("SELECT COUNT(*) FROM books", [], |row| row.get(0))?;
+        let count: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM books", [], |row| row.get(0))?;
         Ok(count as usize)
     }
 
@@ -264,11 +280,12 @@ impl<'a> BookRepository for SqliteBookRepository<'a> {
     }
 
     fn list_all_file_paths(&self) -> Result<Vec<String>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT file_path FROM books WHERE file_path IS NOT NULL",
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT file_path FROM books WHERE file_path IS NOT NULL")?;
         let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
-        rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
     }
 }
 

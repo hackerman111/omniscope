@@ -6,6 +6,9 @@ use crate::panels::find_download::{
 use crate::panels::references::{ReferenceAddTarget, ReferencesPanelAction};
 use crate::popup::{Popup, TelescopeMode};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use omniscope_science::identifiers::extract::{
+    extract_arxiv_ids_from_text, extract_dois_from_text,
+};
 
 pub(crate) fn handle_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
     if handle_science_popup_key(app, code, modifiers) {
@@ -712,17 +715,40 @@ fn handle_science_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifier
                                 reference_index,
                                 target,
                             } => {
-                                let target_text = match target {
-                                    Some(ReferenceAddTarget::Doi(doi)) => format!("DOI:{doi}"),
-                                    Some(ReferenceAddTarget::Arxiv(arxiv)) => {
-                                        format!("arXiv:{arxiv}")
-                                    }
-                                    None => "manual add".to_string(),
-                                };
-                                app.status_message = format!(
-                                    "Add reference {} ({target_text})",
-                                    reference_index + 1
-                                );
+                                if let Some(reference) = panel.references.get(reference_index) {
+                                    let title = reference
+                                        .resolved_title
+                                        .as_deref()
+                                        .unwrap_or(reference.raw_text.as_str());
+                                    let doi = match target.as_ref() {
+                                        Some(ReferenceAddTarget::Doi(doi)) => Some(doi.as_str()),
+                                        _ => reference
+                                            .doi
+                                            .as_ref()
+                                            .map(|value| value.normalized.as_str()),
+                                    };
+                                    let arxiv_value = match target.as_ref() {
+                                        Some(ReferenceAddTarget::Arxiv(arxiv)) => {
+                                            Some(arxiv.to_string())
+                                        }
+                                        _ => reference.arxiv_id.as_ref().map(|value| {
+                                            if let Some(version) = value.version {
+                                                format!("{}v{version}", value.id)
+                                            } else {
+                                                value.id.clone()
+                                            }
+                                        }),
+                                    };
+
+                                    app.add_science_entry_to_library(
+                                        title,
+                                        &reference.resolved_authors,
+                                        reference.resolved_year,
+                                        doi,
+                                        arxiv_value.as_deref(),
+                                        "Add reference",
+                                    );
+                                }
                             }
                             ReferencesPanelAction::FindOnline { reference_index } => {
                                 let query = panel
@@ -790,22 +816,41 @@ fn handle_science_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifier
                                 edge_index,
                                 target,
                             } => {
-                                let target_text = match target {
-                                    Some(
-                                        crate::panels::citation_graph::CitationAddTarget::Doi(doi),
-                                    ) => format!("DOI:{doi}"),
-                                    Some(
-                                        crate::panels::citation_graph::CitationAddTarget::Arxiv(
-                                            arxiv,
-                                        ),
-                                    ) => format!("arXiv:{arxiv}"),
-                                    None => "manual add".to_string(),
-                                };
-                                app.status_message = format!(
-                                    "Add citation {} from {} ({target_text})",
-                                    edge_index + 1,
-                                    mode.label()
-                                );
+                                if let Some(edge) = citation_edge(&panel, mode, edge_index) {
+                                    let doi = match target.as_ref() {
+                                        Some(
+                                            crate::panels::citation_graph::CitationAddTarget::Doi(
+                                                doi,
+                                            ),
+                                        ) => Some(doi.as_str()),
+                                        _ => {
+                                            edge.doi.as_ref().map(|value| value.normalized.as_str())
+                                        }
+                                    };
+                                    let arxiv_value = match target.as_ref() {
+                                        Some(
+                                            crate::panels::citation_graph::CitationAddTarget::Arxiv(
+                                                arxiv,
+                                            ),
+                                        ) => Some(arxiv.to_string()),
+                                        _ => edge.arxiv_id.as_ref().map(|value| {
+                                            if let Some(version) = value.version {
+                                                format!("{}v{version}", value.id)
+                                            } else {
+                                                value.id.clone()
+                                            }
+                                        }),
+                                    };
+
+                                    app.add_science_entry_to_library(
+                                        &edge.title,
+                                        &edge.authors,
+                                        edge.year,
+                                        doi,
+                                        arxiv_value.as_deref(),
+                                        &format!("Add citation ({})", mode.label()),
+                                    );
+                                }
                             }
                             CitationGraphPanelAction::FindOnline { mode, edge_index } => {
                                 if let Some(query) = citation_query(&panel, mode, edge_index) {
@@ -836,11 +881,15 @@ fn handle_science_popup_key(app: &mut App, code: KeyCode, modifiers: KeyModifier
                         source,
                         result_index,
                     } => {
-                        app.status_message = format!(
-                            "Download from {} #{}",
-                            source_name(source),
-                            result_index + 1
-                        );
+                        if let Some(url) = download_url_for_result(&panel, source, result_index) {
+                            app.open_external_url(&url, "download");
+                        } else {
+                            app.status_message = format!(
+                                "No download URL for {} #{}",
+                                source_name(source),
+                                result_index + 1
+                            );
+                        }
                     }
                     FindDownloadPanelAction::ImportMetadata {
                         source,
@@ -1025,6 +1074,57 @@ fn find_result(
     }
 }
 
+fn citation_edge(
+    panel: &CitationGraphPanel,
+    mode: GraphMode,
+    edge_index: usize,
+) -> Option<&crate::panels::citation_graph::CitationEdge> {
+    match mode {
+        GraphMode::References => panel.references.get(edge_index),
+        GraphMode::CitedBy => panel.cited_by.get(edge_index),
+        GraphMode::Related => panel.related.get(edge_index),
+    }
+}
+
+fn download_url_for_result(
+    panel: &FindDownloadPanel,
+    source: FindSource,
+    result_index: usize,
+) -> Option<String> {
+    let result = find_result(panel, source, result_index)?;
+    if let Some(url) = result
+        .open_url
+        .as_ref()
+        .map(|value| value.trim().to_string())
+        && !url.is_empty()
+    {
+        return Some(url);
+    }
+
+    if let Some(primary_id) = result.primary_id.as_deref() {
+        if let Some(doi) = extract_dois_from_text(primary_id).into_iter().next() {
+            return Some(doi.url);
+        }
+        if let Some(arxiv_id) = extract_arxiv_ids_from_text(primary_id).into_iter().next() {
+            return Some(arxiv_id.pdf_url);
+        }
+    }
+
+    let query = panel.query.trim();
+    if query.is_empty() {
+        return None;
+    }
+    if let Some(doi) = extract_dois_from_text(query).into_iter().next() {
+        return Some(doi.url);
+    }
+    if let Some(arxiv_id) = extract_arxiv_ids_from_text(query).into_iter().next() {
+        return Some(arxiv_id.pdf_url);
+    }
+
+    let encoded_query = query.split_whitespace().collect::<Vec<_>>().join("+");
+    Some(format!("https://duckduckgo.com/?q={encoded_query}"))
+}
+
 fn citation_query(
     panel: &CitationGraphPanel,
     mode: GraphMode,
@@ -1186,11 +1286,7 @@ fn update_filepath_suggestions(form: &mut crate::popup::AddBookForm) {
             .filter_map(|e| e.ok())
             .map(|e| {
                 let name = e.file_name().to_string_lossy().to_string();
-                if e.path().is_dir() {
-                    name + "/"
-                } else {
-                    name
-                }
+                if e.path().is_dir() { name + "/" } else { name }
             })
             .filter(|name| name.starts_with(&prefix))
             .collect();

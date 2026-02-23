@@ -1,6 +1,6 @@
+use crate::identifiers::{arxiv::ArxivId, doi::Doi, isbn::Isbn};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use crate::identifiers::{doi::Doi, arxiv::ArxivId, isbn::Isbn};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ScientificIdentifiers {

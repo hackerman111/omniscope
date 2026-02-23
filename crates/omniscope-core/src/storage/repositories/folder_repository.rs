@@ -1,4 +1,4 @@
-use rusqlite::{params, Connection};
+use rusqlite::{Connection, params};
 use std::sync::MutexGuard;
 
 use crate::error::Result;
@@ -65,7 +65,9 @@ impl<'a> Repository for SqliteFolderRepository<'a> {
     }
 
     fn delete(&self, id: &Self::Id) -> Result<bool> {
-        let deleted = self.conn.execute("DELETE FROM folders WHERE id = ?1", params![id])?;
+        let deleted = self
+            .conn
+            .execute("DELETE FROM folders WHERE id = ?1", params![id])?;
         Ok(deleted > 0)
     }
 }
@@ -84,16 +86,20 @@ impl<'a> FolderRepository for SqliteFolderRepository<'a> {
         };
 
         let mut stmt = self.conn.prepare(sql)?;
-        let rows = stmt.query_map(rusqlite::params_from_iter(params_vec.iter().map(|p| p.as_ref())), |row| {
-            Ok(Folder {
-                id: row.get(0)?,
-                name: row.get(1)?,
-                parent_id: row.get(2)?,
-                library_id: row.get(3)?,
-                disk_path: row.get(4)?,
-            })
-        })?;
-        rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
+        let rows = stmt.query_map(
+            rusqlite::params_from_iter(params_vec.iter().map(|p| p.as_ref())),
+            |row| {
+                Ok(Folder {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    parent_id: row.get(2)?,
+                    library_id: row.get(3)?,
+                    disk_path: row.get(4)?,
+                })
+            },
+        )?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
     }
 
     fn rename(&self, id: &str, new_name: &str) -> Result<()> {
@@ -118,11 +124,12 @@ impl<'a> FolderRepository for SqliteFolderRepository<'a> {
     }
 
     fn list_all_paths(&self) -> Result<Vec<String>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT disk_path FROM folders WHERE disk_path IS NOT NULL",
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare("SELECT disk_path FROM folders WHERE disk_path IS NOT NULL")?;
         let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
-        rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(Into::into)
     }
 }
 

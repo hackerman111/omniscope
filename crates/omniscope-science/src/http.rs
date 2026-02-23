@@ -26,6 +26,8 @@ impl RateLimitedClient {
         let client = reqwest::Client::builder()
             .user_agent(user_agent)
             .gzip(true)
+            .connect_timeout(Duration::from_secs(10))
+            .timeout(Duration::from_secs(30))
             .build()
             .expect("failed to build reqwest client");
         Self {

@@ -5,11 +5,10 @@ use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 use omniscope_core::{
-    AppConfig, BookCard, Database, GlobalConfig, LibraryRoot,
-    init_library, InitOptions,
-    scan_library, ScanOptions,
-    FolderTemplate, scaffold_template, sync_folders,
+    AppConfig, BookCard, Database, FolderTemplate, GlobalConfig, InitOptions, LibraryRoot,
+    ScanOptions, init_library, scaffold_template, scan_library, sync_folders,
 };
+use omniscope_science::enrichment::EnrichmentPipeline;
 use omniscope_tui::app::App;
 
 // ─── CLI Definition ─────────────────────────────────────────────────────────
@@ -213,9 +212,7 @@ enum NoteAction {
         heading: Option<String>,
     },
     /// Delete a note by index (0-based).
-    Delete {
-        index: usize,
-    },
+    Delete { index: usize },
 }
 
 // ─── Tag Actions ────────────────────────────────────────────────────────────
@@ -227,7 +224,11 @@ enum TagAction {
     /// Create a tag.
     Create { name: String },
     /// Delete a tag (removes from all books).
-    Delete { name: String, #[arg(long)] confirm: bool },
+    Delete {
+        name: String,
+        #[arg(long)]
+        confirm: bool,
+    },
     /// Rename a tag.
     Rename { old: String, new: String },
 }
@@ -241,7 +242,11 @@ enum LibraryAction {
     /// Create a library.
     Create { name: String },
     /// Delete a library (books are NOT deleted).
-    Delete { name: String, #[arg(long)] confirm: bool },
+    Delete {
+        name: String,
+        #[arg(long)]
+        confirm: bool,
+    },
     /// Rename a library.
     Rename { old: String, new: String },
 }
@@ -318,11 +323,16 @@ fn main() -> Result<()> {
 
     if timing {
         if let Some(ref lr) = library_root {
-            eprintln!("[timing] library discovered at {} in {:.1}ms",
-                lr.root().display(), start.elapsed().as_secs_f64() * 1000.0);
+            eprintln!(
+                "[timing] library discovered at {} in {:.1}ms",
+                lr.root().display(),
+                start.elapsed().as_secs_f64() * 1000.0
+            );
         } else {
-            eprintln!("[timing] no library found, config loaded in {:.1}ms",
-                start.elapsed().as_secs_f64() * 1000.0);
+            eprintln!(
+                "[timing] no library found, config loaded in {:.1}ms",
+                start.elapsed().as_secs_f64() * 1000.0
+            );
         }
     }
 
@@ -388,7 +398,9 @@ fn main() -> Result<()> {
                 if card_path.exists() {
                     let card = omniscope_core::storage::json_cards::load_card(&card_path)?;
                     if json_output {
-                        print_json(&serde_json::json!({"status":"ok","data":card,"meta":{"duration_ms":dur}}))?;
+                        print_json(
+                            &serde_json::json!({"status":"ok","data":card,"meta":{"duration_ms":dur}}),
+                        )?;
                     } else {
                         println!("{}", serde_json::to_string_pretty(&card)?);
                     }
@@ -397,14 +409,18 @@ fn main() -> Result<()> {
                     match db.get_book_summary(&id) {
                         Ok(summary) => {
                             if json_output {
-                                print_json(&serde_json::json!({"status":"ok","data":summary,"meta":{"duration_ms":dur}}))?;
+                                print_json(
+                                    &serde_json::json!({"status":"ok","data":summary,"meta":{"duration_ms":dur}}),
+                                )?;
                             } else {
                                 println!("{}", serde_json::to_string_pretty(&summary)?);
                             }
                         }
                         Err(_) => {
                             if json_output {
-                                print_json(&serde_json::json!({"status":"error","error":"not_found","message":format!("Book {id} not found"),"meta":{"duration_ms":dur}}))?;
+                                print_json(
+                                    &serde_json::json!({"status":"error","error":"not_found","message":format!("Book {id} not found"),"meta":{"duration_ms":dur}}),
+                                )?;
                             } else {
                                 eprintln!("Book not found: {id}");
                             }
@@ -414,7 +430,14 @@ fn main() -> Result<()> {
                 }
             }
 
-            BookAction::Update { id, title, author, year, rating, status } => {
+            BookAction::Update {
+                id,
+                title,
+                author,
+                year,
+                rating,
+                status,
+            } => {
                 let cards_dir = config.cards_dir();
                 let uuid = match uuid::Uuid::parse_str(&id) {
                     Ok(u) => u,
@@ -423,24 +446,33 @@ fn main() -> Result<()> {
                         std::process::exit(2);
                     }
                 };
-                let mut card = match omniscope_core::storage::json_cards::load_card_by_id(&cards_dir, &uuid) {
-                    Ok(c) => c,
-                    Err(_) => {
-                        eprintln!("Book not found: {id}");
-                        std::process::exit(2);
-                    }
-                };
+                let mut card =
+                    match omniscope_core::storage::json_cards::load_card_by_id(&cards_dir, &uuid) {
+                        Ok(c) => c,
+                        Err(_) => {
+                            eprintln!("Book not found: {id}");
+                            std::process::exit(2);
+                        }
+                    };
 
-                if let Some(t) = title { card.metadata.title = t; }
-                if !author.is_empty() { card.metadata.authors = author; }
-                if let Some(y) = year { card.metadata.year = Some(y); }
-                if let Some(r) = rating { card.organization.rating = if r == 0 { None } else { Some(r) }; }
+                if let Some(t) = title {
+                    card.metadata.title = t;
+                }
+                if !author.is_empty() {
+                    card.metadata.authors = author;
+                }
+                if let Some(y) = year {
+                    card.metadata.year = Some(y);
+                }
+                if let Some(r) = rating {
+                    card.organization.rating = if r == 0 { None } else { Some(r) };
+                }
                 if let Some(s) = status {
                     card.organization.read_status = match s.as_str() {
                         "reading" => omniscope_core::ReadStatus::Reading,
-                        "read"    => omniscope_core::ReadStatus::Read,
-                        "dnf"     => omniscope_core::ReadStatus::Dnf,
-                        _         => omniscope_core::ReadStatus::Unread,
+                        "read" => omniscope_core::ReadStatus::Read,
+                        "dnf" => omniscope_core::ReadStatus::Dnf,
+                        _ => omniscope_core::ReadStatus::Unread,
                     };
                 }
 
@@ -451,7 +483,9 @@ fn main() -> Result<()> {
                 let dur = start.elapsed().as_millis();
 
                 if json_output {
-                    print_json(&serde_json::json!({"status":"ok","data":card,"meta":{"duration_ms":dur}}))?;
+                    print_json(
+                        &serde_json::json!({"status":"ok","data":card,"meta":{"duration_ms":dur}}),
+                    )?;
                 } else {
                     println!("Updated: {}", card.metadata.title);
                 }
@@ -470,7 +504,9 @@ fn main() -> Result<()> {
                 )?;
                 let dur = start.elapsed().as_millis();
                 if json_output {
-                    print_json(&serde_json::json!({"status":"ok","data":{"deleted":id},"meta":{"duration_ms":dur}}))?;
+                    print_json(
+                        &serde_json::json!({"status":"ok","data":{"deleted":id},"meta":{"duration_ms":dur}}),
+                    )?;
                 } else {
                     println!("Deleted book: {id}");
                 }
@@ -479,7 +515,8 @@ fn main() -> Result<()> {
             BookAction::Tag { id, add, remove } => {
                 let cards_dir = config.cards_dir();
                 let uuid = uuid::Uuid::parse_str(&id)?;
-                let mut card = omniscope_core::storage::json_cards::load_card_by_id(&cards_dir, &uuid)?;
+                let mut card =
+                    omniscope_core::storage::json_cards::load_card_by_id(&cards_dir, &uuid)?;
 
                 for tag in add {
                     if !card.organization.tags.contains(&tag) {
@@ -497,7 +534,9 @@ fn main() -> Result<()> {
                 let dur = start.elapsed().as_millis();
 
                 if json_output {
-                    print_json(&serde_json::json!({"status":"ok","data":{"tags":card.organization.tags},"meta":{"duration_ms":dur}}))?;
+                    print_json(
+                        &serde_json::json!({"status":"ok","data":{"tags":card.organization.tags},"meta":{"duration_ms":dur}}),
+                    )?;
                 } else {
                     println!("Tags: {}", card.organization.tags.join(", "));
                 }
@@ -506,14 +545,17 @@ fn main() -> Result<()> {
             BookAction::Note { id, action } => {
                 let cards_dir = config.cards_dir();
                 let uuid = uuid::Uuid::parse_str(&id)?;
-                let mut card = omniscope_core::storage::json_cards::load_card_by_id(&cards_dir, &uuid)?;
+                let mut card =
+                    omniscope_core::storage::json_cards::load_card_by_id(&cards_dir, &uuid)?;
                 let dur;
 
                 match action {
                     NoteAction::List => {
                         dur = start.elapsed().as_millis();
                         if json_output {
-                            print_json(&serde_json::json!({"status":"ok","data":{"notes":card.notes},"meta":{"duration_ms":dur}}))?;
+                            print_json(
+                                &serde_json::json!({"status":"ok","data":{"notes":card.notes},"meta":{"duration_ms":dur}}),
+                            )?;
                         } else if card.notes.is_empty() {
                             println!("No notes.");
                         } else {
@@ -534,7 +576,9 @@ fn main() -> Result<()> {
                         omniscope_core::storage::json_cards::save_card(&cards_dir, &card)?;
                         dur = start.elapsed().as_millis();
                         if json_output {
-                            print_json(&serde_json::json!({"status":"ok","data":{"note_count":card.notes.len()},"meta":{"duration_ms":dur}}))?;
+                            print_json(
+                                &serde_json::json!({"status":"ok","data":{"note_count":card.notes.len()},"meta":{"duration_ms":dur}}),
+                            )?;
                         } else {
                             println!("Note added ({} total).", card.notes.len());
                         }
@@ -549,7 +593,9 @@ fn main() -> Result<()> {
                         omniscope_core::storage::json_cards::save_card(&cards_dir, &card)?;
                         dur = start.elapsed().as_millis();
                         if json_output {
-                            print_json(&serde_json::json!({"status":"ok","data":{"note_count":card.notes.len()},"meta":{"duration_ms":dur}}))?;
+                            print_json(
+                                &serde_json::json!({"status":"ok","data":{"note_count":card.notes.len()},"meta":{"duration_ms":dur}}),
+                            )?;
                         } else {
                             println!("Note deleted ({} remaining).", card.notes.len());
                         }
@@ -558,72 +604,157 @@ fn main() -> Result<()> {
             }
         },
 
-        Some(Commands::Add { file, title, author, year, tag, library }) => {
+        Some(Commands::Add {
+            file,
+            title,
+            author,
+            year,
+            tag,
+            library,
+        }) => {
+            let mut enrichment_report = None;
             let mut card = if let Some(ref file_path) = file {
-                omniscope_core::file_import::import_file(Path::new(file_path))?
+                let mut imported = omniscope_core::file_import::import_file(Path::new(file_path))?;
+                enrichment_report = Some(enrich_card_metadata(&mut imported));
+                imported
             } else {
                 BookCard::new(title.as_deref().unwrap_or("Untitled"))
             };
 
-            if let Some(t) = title { card.metadata.title = t; }
-            if !author.is_empty() { card.metadata.authors = author; }
-            if let Some(y) = year { card.metadata.year = Some(y); }
+            if let Some(t) = title {
+                card.metadata.title = t;
+            }
+            if !author.is_empty() {
+                card.metadata.authors = author;
+            }
+            if let Some(y) = year {
+                card.metadata.year = Some(y);
+            }
             card.organization.tags = tag;
-            if let Some(lib) = library { card.organization.libraries.push(lib); }
+            if let Some(lib) = library {
+                card.organization.libraries.push(lib);
+            }
 
-            let cards_dir = config.cards_dir();
+            let cards_dir = resolve_cards_dir(&library_root, &config);
             omniscope_core::storage::json_cards::save_card(&cards_dir, &card)?;
-            let db = open_db(&config)?;
+            let db = resolve_db(&library_root, &config)?;
             db.upsert_book(&card)?;
             let dur = start.elapsed().as_millis();
 
             if json_output {
-                print_json(&serde_json::json!({"status":"ok","data":card,"meta":{"duration_ms":dur}}))?;
+                let enrichment_json = enrichment_report.as_ref().map(|report| {
+                    serde_json::json!({
+                        "fields_updated": report.fields_updated.len(),
+                        "warnings": report.errors.len(),
+                    })
+                });
+                print_json(
+                    &serde_json::json!({"status":"ok","data":card,"enrichment":enrichment_json,"meta":{"duration_ms":dur}}),
+                )?;
             } else {
                 println!("Added: {} ({})", card.metadata.title, card.id);
+                if let Some(report) = enrichment_report {
+                    println!(
+                        "  Metadata: {} field(s) updated, {} warning(s)",
+                        report.fields_updated.len(),
+                        report.errors.len()
+                    );
+                }
             }
         }
 
         Some(Commands::Import { dir, recursive }) => {
             let cards = omniscope_core::file_import::scan_directory(Path::new(&dir), recursive)?;
-            let db = open_db(&config)?;
-            let cards_dir = config.cards_dir();
+            let db = resolve_db(&library_root, &config)?;
+            let cards_dir = resolve_cards_dir(&library_root, &config);
             let mut count = 0;
+            let mut created_count = 0usize;
+            let mut updated_existing_count = 0usize;
+            let mut cards_with_metadata_updates = 0usize;
+            let mut updated_fields_total = 0usize;
+            let mut warnings_total = 0usize;
 
-            for card in &cards {
-                omniscope_core::storage::json_cards::save_card(&cards_dir, card)?;
-                db.upsert_book(card)?;
+            let mut existing_by_path = std::collections::HashMap::new();
+            if let Ok(existing_cards) = omniscope_core::storage::json_cards::list_cards(&cards_dir)
+            {
+                for existing_card in existing_cards {
+                    if let Some(file) = existing_card.file.as_ref() {
+                        existing_by_path.insert(file.path.clone(), existing_card);
+                    }
+                }
+            }
+
+            for scanned_card in cards {
+                let (mut card, is_update) =
+                    if let Some(path) = scanned_card.file.as_ref().map(|file| file.path.clone()) {
+                        if let Some(existing_card) = existing_by_path.remove(&path) {
+                            updated_existing_count += 1;
+                            (existing_card, true)
+                        } else {
+                            created_count += 1;
+                            (scanned_card, false)
+                        }
+                    } else {
+                        created_count += 1;
+                        (scanned_card, false)
+                    };
+
+                let report = enrich_card_metadata(&mut card);
+                if !report.fields_updated.is_empty() {
+                    cards_with_metadata_updates += 1;
+                    updated_fields_total += report.fields_updated.len();
+                }
+                warnings_total += report.errors.len();
+
+                omniscope_core::storage::json_cards::save_card(&cards_dir, &card)?;
+                db.upsert_book(&card)?;
                 count += 1;
                 if !json_output {
-                    println!("  Imported: {}", card.metadata.title);
+                    if is_update {
+                        println!("  Updated: {}", card.metadata.title);
+                    } else {
+                        println!("  Imported: {}", card.metadata.title);
+                    }
                 }
             }
             let dur = start.elapsed().as_millis();
 
             if json_output {
                 print_json(&serde_json::json!({
-                    "status":"ok","data":{"imported":count,"total":db.count_books()?},
+                    "status":"ok","data":{"processed":count,"created":created_count,"updated":updated_existing_count,"total":db.count_books()?,"metadata":{"cards_updated":cards_with_metadata_updates,"fields_updated":updated_fields_total,"warnings":warnings_total}},
                     "meta":{"duration_ms":dur}
                 }))?;
             } else {
-                println!("Imported {count} book(s).");
+                println!(
+                    "Processed {count} book(s): created {created_count}, updated {updated_existing_count}."
+                );
+                println!(
+                    "Metadata enriched: {} card(s), {} field(s), {} warning(s).",
+                    cards_with_metadata_updates, updated_fields_total, warnings_total
+                );
             }
         }
 
         // ── Tag ────────────────────────────────────────────────────────────
-
         Some(Commands::Tag { action }) => match action {
             TagAction::List => {
                 let db = open_db(&config)?;
                 let tags = db.list_tags()?;
                 let dur = start.elapsed().as_millis();
                 if json_output {
-                    let items: Vec<serde_json::Value> = tags.iter().map(|(n, c)| serde_json::json!({"name":n,"count":c})).collect();
-                    print_json(&serde_json::json!({"status":"ok","data":items,"meta":{"duration_ms":dur}}))?;
+                    let items: Vec<serde_json::Value> = tags
+                        .iter()
+                        .map(|(n, c)| serde_json::json!({"name":n,"count":c}))
+                        .collect();
+                    print_json(
+                        &serde_json::json!({"status":"ok","data":items,"meta":{"duration_ms":dur}}),
+                    )?;
                 } else if tags.is_empty() {
                     println!("No tags.");
                 } else {
-                    for (name, count) in &tags { println!("  #{name} ({count})"); }
+                    for (name, count) in &tags {
+                        println!("  #{name} ({count})");
+                    }
                 }
             }
             TagAction::Create { name } => {
@@ -631,9 +762,13 @@ fn main() -> Result<()> {
                 // Here we just confirm the intent and show the name.
                 let dur = start.elapsed().as_millis();
                 if json_output {
-                    print_json(&serde_json::json!({"status":"ok","data":{"name":name,"note":"Tags are created automatically when assigned to books"},"meta":{"duration_ms":dur}}))?;
+                    print_json(
+                        &serde_json::json!({"status":"ok","data":{"name":name,"note":"Tags are created automatically when assigned to books"},"meta":{"duration_ms":dur}}),
+                    )?;
                 } else {
-                    println!("Tag '#{name}' registered. Assign it to books with `omniscope book tag --add {name}`.");
+                    println!(
+                        "Tag '#{name}' registered. Assign it to books with `omniscope book tag --add {name}`."
+                    );
                 }
             }
             TagAction::Delete { name, confirm } => {
@@ -650,7 +785,8 @@ fn main() -> Result<()> {
                         card.organization.tags.retain(|t| t != &name);
                         if card.organization.tags.len() != before {
                             card.updated_at = chrono::Utc::now();
-                            let _ = omniscope_core::storage::json_cards::save_card(&cards_dir, &card);
+                            let _ =
+                                omniscope_core::storage::json_cards::save_card(&cards_dir, &card);
                             let _ = db.upsert_book(&card);
                             removed += 1;
                         }
@@ -658,7 +794,9 @@ fn main() -> Result<()> {
                 }
                 let dur = start.elapsed().as_millis();
                 if json_output {
-                    print_json(&serde_json::json!({"status":"ok","data":{"deleted":name,"affected_books":removed},"meta":{"duration_ms":dur}}))?;
+                    print_json(
+                        &serde_json::json!({"status":"ok","data":{"deleted":name,"affected_books":removed},"meta":{"duration_ms":dur}}),
+                    )?;
                 } else {
                     println!("Deleted tag '#{name}' from {removed} book(s).");
                 }
@@ -670,11 +808,17 @@ fn main() -> Result<()> {
                 if let Ok(cards) = omniscope_core::storage::json_cards::list_cards(&cards_dir) {
                     for mut card in cards {
                         let changed = card.organization.tags.iter_mut().any(|t| {
-                            if t == &old { *t = new.clone(); true } else { false }
+                            if t == &old {
+                                *t = new.clone();
+                                true
+                            } else {
+                                false
+                            }
                         });
                         if changed {
                             card.updated_at = chrono::Utc::now();
-                            let _ = omniscope_core::storage::json_cards::save_card(&cards_dir, &card);
+                            let _ =
+                                omniscope_core::storage::json_cards::save_card(&cards_dir, &card);
                             let _ = db.upsert_book(&card);
                             renamed += 1;
                         }
@@ -682,7 +826,9 @@ fn main() -> Result<()> {
                 }
                 let dur = start.elapsed().as_millis();
                 if json_output {
-                    print_json(&serde_json::json!({"status":"ok","data":{"old":old,"new":new,"affected_books":renamed},"meta":{"duration_ms":dur}}))?;
+                    print_json(
+                        &serde_json::json!({"status":"ok","data":{"old":old,"new":new,"affected_books":renamed},"meta":{"duration_ms":dur}}),
+                    )?;
                 } else {
                     println!("Renamed tag '#{old}' → '#{new}' on {renamed} book(s).");
                 }
@@ -690,27 +836,37 @@ fn main() -> Result<()> {
         },
 
         // ── Library ────────────────────────────────────────────────────────
-
         Some(Commands::Library { action }) => match action {
             LibraryAction::List => {
                 let db = open_db(&config)?;
                 let libs = db.list_libraries()?;
                 let dur = start.elapsed().as_millis();
                 if json_output {
-                    let items: Vec<serde_json::Value> = libs.iter().map(|(n, c)| serde_json::json!({"name":n,"count":c})).collect();
-                    print_json(&serde_json::json!({"status":"ok","data":items,"meta":{"duration_ms":dur}}))?;
+                    let items: Vec<serde_json::Value> = libs
+                        .iter()
+                        .map(|(n, c)| serde_json::json!({"name":n,"count":c}))
+                        .collect();
+                    print_json(
+                        &serde_json::json!({"status":"ok","data":items,"meta":{"duration_ms":dur}}),
+                    )?;
                 } else if libs.is_empty() {
                     println!("No libraries.");
                 } else {
-                    for (name, count) in &libs { println!("  📁 {name} ({count})"); }
+                    for (name, count) in &libs {
+                        println!("  📁 {name} ({count})");
+                    }
                 }
             }
             LibraryAction::Create { name } => {
                 let dur = start.elapsed().as_millis();
                 if json_output {
-                    print_json(&serde_json::json!({"status":"ok","data":{"name":name,"note":"Libraries are created automatically when assigned to books"},"meta":{"duration_ms":dur}}))?;
+                    print_json(
+                        &serde_json::json!({"status":"ok","data":{"name":name,"note":"Libraries are created automatically when assigned to books"},"meta":{"duration_ms":dur}}),
+                    )?;
                 } else {
-                    println!("Library '{name}' registered. Add books with `omniscope add --library \"{name}\"`.");
+                    println!(
+                        "Library '{name}' registered. Add books with `omniscope add --library \"{name}\"`."
+                    );
                 }
             }
             LibraryAction::Delete { name, confirm } => {
@@ -727,7 +883,8 @@ fn main() -> Result<()> {
                         card.organization.libraries.retain(|l| l != &name);
                         if card.organization.libraries.len() != before {
                             card.updated_at = chrono::Utc::now();
-                            let _ = omniscope_core::storage::json_cards::save_card(&cards_dir, &card);
+                            let _ =
+                                omniscope_core::storage::json_cards::save_card(&cards_dir, &card);
                             let _ = db.upsert_book(&card);
                             removed += 1;
                         }
@@ -735,7 +892,9 @@ fn main() -> Result<()> {
                 }
                 let dur = start.elapsed().as_millis();
                 if json_output {
-                    print_json(&serde_json::json!({"status":"ok","data":{"deleted":name,"affected_books":removed},"meta":{"duration_ms":dur}}))?;
+                    print_json(
+                        &serde_json::json!({"status":"ok","data":{"deleted":name,"affected_books":removed},"meta":{"duration_ms":dur}}),
+                    )?;
                 } else {
                     println!("Removed library '{name}' from {removed} book(s).");
                 }
@@ -747,11 +906,17 @@ fn main() -> Result<()> {
                 if let Ok(cards) = omniscope_core::storage::json_cards::list_cards(&cards_dir) {
                     for mut card in cards {
                         let changed = card.organization.libraries.iter_mut().any(|l| {
-                            if l == &old { *l = new.clone(); true } else { false }
+                            if l == &old {
+                                *l = new.clone();
+                                true
+                            } else {
+                                false
+                            }
                         });
                         if changed {
                             card.updated_at = chrono::Utc::now();
-                            let _ = omniscope_core::storage::json_cards::save_card(&cards_dir, &card);
+                            let _ =
+                                omniscope_core::storage::json_cards::save_card(&cards_dir, &card);
                             let _ = db.upsert_book(&card);
                             renamed += 1;
                         }
@@ -759,7 +924,9 @@ fn main() -> Result<()> {
                 }
                 let dur = start.elapsed().as_millis();
                 if json_output {
-                    print_json(&serde_json::json!({"status":"ok","data":{"old":old,"new":new,"affected_books":renamed},"meta":{"duration_ms":dur}}))?;
+                    print_json(
+                        &serde_json::json!({"status":"ok","data":{"old":old,"new":new,"affected_books":renamed},"meta":{"duration_ms":dur}}),
+                    )?;
                 } else {
                     println!("Renamed library '{old}' → '{new}' on {renamed} book(s).");
                 }
@@ -767,7 +934,6 @@ fn main() -> Result<()> {
         },
 
         // ── Folder ─────────────────────────────────────────────────────────
-
         Some(Commands::Folder { action }) => match action {
             FolderAction::List { parent } => {
                 let db = open_db(&config)?;
@@ -775,19 +941,29 @@ fn main() -> Result<()> {
                 let dur = start.elapsed().as_millis();
                 if json_output {
                     let items: Vec<serde_json::Value> = folders.iter().map(|f| serde_json::json!({"id":f.id,"name":f.name,"parent_id":f.parent_id,"library_id":f.library_id})).collect();
-                    print_json(&serde_json::json!({"status":"ok","data":items,"meta":{"duration_ms":dur}}))?;
+                    print_json(
+                        &serde_json::json!({"status":"ok","data":items,"meta":{"duration_ms":dur}}),
+                    )?;
                 } else if folders.is_empty() {
                     println!("No folders.");
                 } else {
-                    for f in &folders { println!("  {} — {}", &f.id[..8], f.name); }
+                    for f in &folders {
+                        println!("  {} — {}", &f.id[..8], f.name);
+                    }
                 }
             }
-            FolderAction::Create { name, parent, library } => {
+            FolderAction::Create {
+                name,
+                parent,
+                library,
+            } => {
                 let db = open_db(&config)?;
                 let id = db.create_folder(&name, parent.as_deref(), library.as_deref())?;
                 let dur = start.elapsed().as_millis();
                 if json_output {
-                    print_json(&serde_json::json!({"status":"ok","data":{"id":id,"name":name},"meta":{"duration_ms":dur}}))?;
+                    print_json(
+                        &serde_json::json!({"status":"ok","data":{"id":id,"name":name},"meta":{"duration_ms":dur}}),
+                    )?;
                 } else {
                     println!("Created folder '{}' ({}).", name, &id[..8]);
                 }
@@ -797,7 +973,9 @@ fn main() -> Result<()> {
                 db.delete_folder(&id)?;
                 let dur = start.elapsed().as_millis();
                 if json_output {
-                    print_json(&serde_json::json!({"status":"ok","data":{"deleted":id},"meta":{"duration_ms":dur}}))?;
+                    print_json(
+                        &serde_json::json!({"status":"ok","data":{"deleted":id},"meta":{"duration_ms":dur}}),
+                    )?;
                 } else {
                     println!("Deleted folder: {id}");
                 }
@@ -807,7 +985,9 @@ fn main() -> Result<()> {
                 db.rename_folder(&id, &name)?;
                 let dur = start.elapsed().as_millis();
                 if json_output {
-                    print_json(&serde_json::json!({"status":"ok","data":{"id":id,"name":name},"meta":{"duration_ms":dur}}))?;
+                    print_json(
+                        &serde_json::json!({"status":"ok","data":{"id":id,"name":name},"meta":{"duration_ms":dur}}),
+                    )?;
                 } else {
                     println!("Renamed folder to '{name}'.");
                 }
@@ -870,13 +1050,19 @@ fn main() -> Result<()> {
                     println!("Folder sync report:");
                     println!("  ✓  {} folder(s) in sync", report.in_sync);
                     if !report.new_on_disk.is_empty() {
-                        println!("  ⊕  {} new folder(s) on disk (not tracked):", report.new_on_disk.len());
+                        println!(
+                            "  ⊕  {} new folder(s) on disk (not tracked):",
+                            report.new_on_disk.len()
+                        );
                         for f in &report.new_on_disk {
                             println!("       {}", f);
                         }
                     }
                     if !report.missing_on_disk.is_empty() {
-                        println!("  ⊘  {} folder(s) missing on disk:", report.missing_on_disk.len());
+                        println!(
+                            "  ⊘  {} folder(s) missing on disk:",
+                            report.missing_on_disk.len()
+                        );
                         for f in &report.missing_on_disk {
                             println!("       {}", f);
                         }
@@ -895,14 +1081,15 @@ fn main() -> Result<()> {
         },
 
         // ── Config ─────────────────────────────────────────────────────────
-
         Some(Commands::Config { action }) => {
             let dur = start.elapsed().as_millis();
             match action {
                 ConfigAction::List => {
                     let kv = config_key_values(&config);
                     if json_output {
-                        print_json(&serde_json::json!({"status":"ok","data":kv,"meta":{"duration_ms":dur}}))?;
+                        print_json(
+                            &serde_json::json!({"status":"ok","data":kv,"meta":{"duration_ms":dur}}),
+                        )?;
                     } else {
                         for (k, v) in &kv {
                             println!("{k} = {v}");
@@ -914,7 +1101,9 @@ fn main() -> Result<()> {
                     match kv.get(key.as_str()) {
                         Some(val) => {
                             if json_output {
-                                print_json(&serde_json::json!({"status":"ok","data":{"key":key,"value":val},"meta":{"duration_ms":dur}}))?;
+                                print_json(
+                                    &serde_json::json!({"status":"ok","data":{"key":key,"value":val},"meta":{"duration_ms":dur}}),
+                                )?;
                             } else {
                                 println!("{val}");
                             }
@@ -935,7 +1124,6 @@ fn main() -> Result<()> {
         }
 
         // ── Stats ──────────────────────────────────────────────────────────
-
         Some(Commands::Stats) => {
             let db = open_db(&config)?;
             let count = db.count_books()?;
@@ -958,7 +1146,6 @@ fn main() -> Result<()> {
         }
 
         // ── Doctor ─────────────────────────────────────────────────────────
-
         Some(Commands::Doctor) => {
             let config_path = AppConfig::config_path();
             if config_path.exists() {
@@ -977,13 +1164,23 @@ fn main() -> Result<()> {
                         let count = db.count_books().unwrap_or(0);
                         println!("✓ Database: {} ({count} books)", db_path.display());
                     }
-                    Err(e) => { issues += 1; println!("✗ Database: {e}"); }
+                    Err(e) => {
+                        issues += 1;
+                        println!("✗ Database: {e}");
+                    }
                 }
 
                 let cards_dir = lr.cards_dir();
                 if cards_dir.exists() {
                     let cc = std::fs::read_dir(&cards_dir)
-                        .map(|rd| rd.filter(|e| e.as_ref().is_ok_and(|e| e.path().extension().is_some_and(|ext| ext == "json"))).count())
+                        .map(|rd| {
+                            rd.filter(|e| {
+                                e.as_ref().is_ok_and(|e| {
+                                    e.path().extension().is_some_and(|ext| ext == "json")
+                                })
+                            })
+                            .count()
+                        })
                         .unwrap_or(0);
                     println!("✓ Cards: {} ({cc} files)", cards_dir.display());
                 } else {
@@ -998,26 +1195,37 @@ fn main() -> Result<()> {
                 }
             }
 
-            if issues == 0 { println!("\nAll checks passed ✓"); }
-            else { println!("\n{issues} issues found"); std::process::exit(1); }
+            if issues == 0 {
+                println!("\nAll checks passed ✓");
+            } else {
+                println!("\n{issues} issues found");
+                std::process::exit(1);
+            }
         }
 
         // ── Version ────────────────────────────────────────────────────────
-
         Some(Commands::Version) => {
             let version = env!("CARGO_PKG_VERSION");
             let dur = start.elapsed().as_millis();
             if json_output {
-                print_json(&serde_json::json!({"status":"ok","data":{"version":version},"meta":{"duration_ms":dur}}))?;
+                print_json(
+                    &serde_json::json!({"status":"ok","data":{"version":version},"meta":{"duration_ms":dur}}),
+                )?;
             } else {
                 println!("omniscope v{version}");
             }
         }
 
         // ── Init ───────────────────────────────────────────────────────────
-
-        Some(Commands::Init { path, name, create_dir, scan_existing }) => {
-            let root = PathBuf::from(&path).canonicalize().unwrap_or_else(|_| PathBuf::from(&path));
+        Some(Commands::Init {
+            path,
+            name,
+            create_dir,
+            scan_existing,
+        }) => {
+            let root = PathBuf::from(&path)
+                .canonicalize()
+                .unwrap_or_else(|_| PathBuf::from(&path));
             let opts = InitOptions {
                 name: name.clone(),
                 create_dir,
@@ -1045,9 +1253,15 @@ fn main() -> Result<()> {
                             "meta": { "duration_ms": dur }
                         }))?;
                     } else {
-                        println!("Initialized library '{}' at {}", manifest.library.name, lr.root().display());
+                        println!(
+                            "Initialized library '{}' at {}",
+                            manifest.library.name,
+                            lr.root().display()
+                        );
                         println!("  ID: {}", manifest.library.id);
-                        println!("  .libr/ directory created with: cards/, db/, cache/, undo/, backups/");
+                        println!(
+                            "  .libr/ directory created with: cards/, db/, cache/, undo/, backups/"
+                        );
                         if scan_existing {
                             // Scan will be implemented in Phase C
                             println!("  (--scan-existing is not yet implemented)");
@@ -1066,7 +1280,6 @@ fn main() -> Result<()> {
         }
 
         // ── Scan ───────────────────────────────────────────────────────────
-
         Some(Commands::Scan { auto_create_cards }) => {
             let lr = require_library(&library_root, json_output)?;
             let db = open_db_from_root(&lr)?;
@@ -1113,7 +1326,6 @@ fn main() -> Result<()> {
         }
 
         // ── Sync ───────────────────────────────────────────────────────────
-
         Some(Commands::Sync) => {
             let lr = require_library(&library_root, json_output)?;
             let db = open_db_from_root(&lr)?;
@@ -1122,7 +1334,9 @@ fn main() -> Result<()> {
                 let count = db.sync_from_cards(&cards_dir)?;
                 let dur = start.elapsed().as_millis();
                 if json_output {
-                    print_json(&serde_json::json!({"status":"ok","data":{"synced":count},"meta":{"duration_ms":dur}}))?;
+                    print_json(
+                        &serde_json::json!({"status":"ok","data":{"synced":count},"meta":{"duration_ms":dur}}),
+                    )?;
                 } else {
                     println!("Synced {count} card(s) into database.");
                 }
@@ -1132,21 +1346,27 @@ fn main() -> Result<()> {
         }
 
         // ── Libraries ──────────────────────────────────────────────────────
-
         Some(Commands::Libraries { action }) => match action {
             LibrariesAction::List => {
                 let gc = GlobalConfig::load()?;
                 let dur = start.elapsed().as_millis();
                 if json_output {
-                    let items: Vec<serde_json::Value> = gc.known_libraries().iter().map(|l| {
-                        serde_json::json!({"name": l.name, "path": l.path, "id": l.id})
-                    }).collect();
-                    print_json(&serde_json::json!({"status":"ok","data":items,"meta":{"duration_ms":dur}}))?;
+                    let items: Vec<serde_json::Value> = gc
+                        .known_libraries()
+                        .iter()
+                        .map(|l| serde_json::json!({"name": l.name, "path": l.path, "id": l.id}))
+                        .collect();
+                    print_json(
+                        &serde_json::json!({"status":"ok","data":items,"meta":{"duration_ms":dur}}),
+                    )?;
                 } else if gc.known_libraries().is_empty() {
-                    println!("No known libraries. Run 'omniscope init' in a directory to create one.");
+                    println!(
+                        "No known libraries. Run 'omniscope init' in a directory to create one."
+                    );
                 } else {
                     for lib in gc.known_libraries() {
-                        let active = library_root.as_ref()
+                        let active = library_root
+                            .as_ref()
                             .is_some_and(|lr| lr.root().to_string_lossy() == lib.path);
                         let marker = if active { " *" } else { "" };
                         println!("  📚 {} — {}{marker}", lib.name, lib.path);
@@ -1159,16 +1379,24 @@ fn main() -> Result<()> {
                 gc.save()?;
                 let dur = start.elapsed().as_millis();
                 if json_output {
-                    print_json(&serde_json::json!({"status":"ok","data":{"forgotten":path},"meta":{"duration_ms":dur}}))?;
+                    print_json(
+                        &serde_json::json!({"status":"ok","data":{"forgotten":path},"meta":{"duration_ms":dur}}),
+                    )?;
                 } else {
-                    println!("Removed '{}' from known libraries. Data is NOT deleted.", path);
+                    println!(
+                        "Removed '{}' from known libraries. Data is NOT deleted.",
+                        path
+                    );
                 }
             }
         },
     }
 
     if timing {
-        eprintln!("[timing] total {:.1}ms", start.elapsed().as_secs_f64() * 1000.0);
+        eprintln!(
+            "[timing] total {:.1}ms",
+            start.elapsed().as_secs_f64() * 1000.0
+        );
     }
 
     Ok(())
@@ -1236,10 +1464,23 @@ fn require_library(library_root: &Option<LibraryRoot>, json_output: bool) -> Res
     }
 }
 
+fn enrich_card_metadata(card: &mut BookCard) -> omniscope_science::enrichment::EnrichmentReport {
+    EnrichmentPipeline::enrich_full_metadata_blocking(card)
+}
+
 fn config_key_values(config: &AppConfig) -> std::collections::HashMap<&'static str, String> {
     let mut map = std::collections::HashMap::new();
-    map.insert("library_path", config.library_path().to_string_lossy().to_string());
-    map.insert("cards_dir", config.cards_dir().to_string_lossy().to_string());
-    map.insert("database_path", config.database_path().to_string_lossy().to_string());
+    map.insert(
+        "library_path",
+        config.library_path().to_string_lossy().to_string(),
+    );
+    map.insert(
+        "cards_dir",
+        config.cards_dir().to_string_lossy().to_string(),
+    );
+    map.insert(
+        "database_path",
+        config.database_path().to_string_lossy().to_string(),
+    );
     map
 }

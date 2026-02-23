@@ -1,22 +1,22 @@
 pub mod app;
-pub mod event;
-pub mod popup;
-pub mod ui;
-pub mod keys;
 pub mod command;
+pub mod event;
+pub mod keys;
 pub mod panels;
+pub mod popup;
 pub mod theme;
+pub mod ui;
 
 use std::io;
 use std::time::Duration;
 
 use anyhow::Result;
-use crossterm::terminal::{
-    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
-};
 use crossterm::ExecutableCommand;
-use ratatui::backend::CrosstermBackend;
+use crossterm::terminal::{
+    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+};
 use ratatui::Terminal;
+use ratatui::backend::CrosstermBackend;
 
 use app::App;
 use event::{AppEvent, EventHandler};
@@ -47,7 +47,7 @@ pub fn run_tui(app: &mut App) -> Result<()> {
         match event_handler.next()? {
             AppEvent::Key(key) => keys::handle_key(app, key.code, key.modifiers),
             AppEvent::Resize(_, _) => {}
-            AppEvent::Tick => {}
+            AppEvent::Tick => app.poll_background_tasks(),
         }
 
         // Handle pending editor launch (requires terminal suspension)
@@ -58,9 +58,7 @@ pub fn run_tui(app: &mut App) -> Result<()> {
 
             // Launch editor
             let editor = std::env::var("EDITOR").unwrap_or_else(|_| "vim".to_string());
-            let status = std::process::Command::new(&editor)
-                .arg(&path)
-                .status();
+            let status = std::process::Command::new(&editor).arg(&path).status();
 
             match status {
                 Ok(s) if s.success() => {

@@ -1,17 +1,14 @@
 use crate::error::{Result, ScienceError};
-use serde::{Deserialize, Serialize};
 use once_cell::sync::Lazy;
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 
 // New format: YYMM.NNNNN or YYMM.NNNNNN (with optional version)
-static NEW_FORMAT: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"^(\d{4}\.\d{4,5})(v(\d+))?$").unwrap()
-});
+static NEW_FORMAT: Lazy<Regex> = Lazy::new(|| Regex::new(r"^(\d{4}\.\d{4,5})(v(\d+))?$").unwrap());
 
 // Old format: category/YYMMNNN
-static OLD_FORMAT: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"^([a-zA-Z\-]+(?:\.[A-Z]{2})?/\d{7})(v(\d+))?$").unwrap()
-});
+static OLD_FORMAT: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^([a-zA-Z\-]+(?:\.[A-Z]{2})?/\d{7})(v(\d+))?$").unwrap());
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ArxivId {

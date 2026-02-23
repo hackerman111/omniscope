@@ -51,37 +51,93 @@ impl Default for NordTheme {
 
 impl NordTheme {
     // Semantic aliases
-    pub fn bg(&self) -> Color { self.nord0 }
-    pub fn bg_secondary(&self) -> Color { self.nord1 }
-    pub fn border(&self) -> Color { self.nord2 }
-    pub fn muted(&self) -> Color { self.nord3 }
+    pub fn bg(&self) -> Color {
+        self.nord0
+    }
+    pub fn bg_secondary(&self) -> Color {
+        self.nord1
+    }
+    pub fn border(&self) -> Color {
+        self.nord2
+    }
+    pub fn muted(&self) -> Color {
+        self.nord3
+    }
 
-    pub fn fg(&self) -> Color { self.nord4 }
-    pub fn fg_bright(&self) -> Color { self.nord5 }
-    pub fn fg_white(&self) -> Color { self.nord6 }
+    pub fn fg(&self) -> Color {
+        self.nord4
+    }
+    pub fn fg_bright(&self) -> Color {
+        self.nord5
+    }
+    pub fn fg_white(&self) -> Color {
+        self.nord6
+    }
 
-    pub fn frost_mint(&self) -> Color { self.nord7 }
-    pub fn frost_ice(&self) -> Color { self.nord8 }
-    pub fn frost_blue(&self) -> Color { self.nord9 }
-    pub fn frost_dark(&self) -> Color { self.nord10 }
+    pub fn frost_mint(&self) -> Color {
+        self.nord7
+    }
+    pub fn frost_ice(&self) -> Color {
+        self.nord8
+    }
+    pub fn frost_blue(&self) -> Color {
+        self.nord9
+    }
+    pub fn frost_dark(&self) -> Color {
+        self.nord10
+    }
 
-    pub fn red(&self) -> Color { self.nord11 }
-    pub fn orange(&self) -> Color { self.nord12 }
-    pub fn yellow(&self) -> Color { self.nord13 }
-    pub fn green(&self) -> Color { self.nord14 }
-    pub fn purple(&self) -> Color { self.nord15 }
+    pub fn red(&self) -> Color {
+        self.nord11
+    }
+    pub fn orange(&self) -> Color {
+        self.nord12
+    }
+    pub fn yellow(&self) -> Color {
+        self.nord13
+    }
+    pub fn green(&self) -> Color {
+        self.nord14
+    }
+    pub fn purple(&self) -> Color {
+        self.nord15
+    }
 
     // Logic aliases
-    pub fn cursor_bg(&self) -> Color { self.frost_dark() }
-    pub fn cursor_fg(&self) -> Color { self.fg_white() }
-    pub fn selection_bg(&self) -> Color { self.bg_secondary() }
-    pub fn active_panel(&self) -> Color { self.frost_ice() }
-    pub fn inactive_panel(&self) -> Color { self.muted() }
-    pub fn tag_color(&self) -> Color { self.frost_blue() }
-    pub fn path_color(&self) -> Color { self.frost_mint() }
-    pub fn ai_color(&self) -> Color { self.purple() }
-    pub fn danger(&self) -> Color { self.red() }
-    pub fn success(&self) -> Color { self.green() }
-    pub fn warning(&self) -> Color { self.orange() }
-    pub fn star_color(&self) -> Color { self.yellow() }
+    pub fn cursor_bg(&self) -> Color {
+        self.frost_dark()
+    }
+    pub fn cursor_fg(&self) -> Color {
+        self.fg_white()
+    }
+    pub fn selection_bg(&self) -> Color {
+        self.bg_secondary()
+    }
+    pub fn active_panel(&self) -> Color {
+        self.frost_ice()
+    }
+    pub fn inactive_panel(&self) -> Color {
+        self.muted()
+    }
+    pub fn tag_color(&self) -> Color {
+        self.frost_blue()
+    }
+    pub fn path_color(&self) -> Color {
+        self.frost_mint()
+    }
+    pub fn ai_color(&self) -> Color {
+        self.purple()
+    }
+    pub fn danger(&self) -> Color {
+        self.red()
+    }
+    pub fn success(&self) -> Color {
+        self.green()
+    }
+    pub fn warning(&self) -> Color {
+        self.orange()
+    }
+    pub fn star_color(&self) -> Color {
+        self.yellow()
+    }
 }

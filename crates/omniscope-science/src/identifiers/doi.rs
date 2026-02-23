@@ -37,7 +37,9 @@ impl Doi {
         if !stripped.starts_with("10.") {
             return Err(ScienceError::InvalidDoi(input.to_string()));
         }
-        let slash_pos = stripped.find('/').ok_or_else(|| ScienceError::InvalidDoi(input.to_string()))?;
+        let slash_pos = stripped
+            .find('/')
+            .ok_or_else(|| ScienceError::InvalidDoi(input.to_string()))?;
         let suffix = &stripped[slash_pos + 1..];
         if suffix.is_empty() {
             return Err(ScienceError::InvalidDoi(input.to_string()));

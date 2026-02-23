@@ -244,7 +244,11 @@ pub fn get_hints(app: &App) -> Vec<KeyHint> {
                     },
                     KeyHint {
                         key: "s",
-                        desc: "related/status",
+                        desc: "related",
+                    },
+                    KeyHint {
+                        key: "S",
+                        desc: "status",
                     },
                     KeyHint {
                         key: "d",
@@ -425,6 +429,10 @@ pub fn get_hints(app: &App) -> Vec<KeyHint> {
                     KeyHint {
                         key: "e",
                         desc: "AI enrich",
+                    },
+                    KeyHint {
+                        key: "m",
+                        desc: "metadata enrich",
                     },
                     KeyHint {
                         key: "r",

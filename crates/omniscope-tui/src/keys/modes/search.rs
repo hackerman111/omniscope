@@ -1,5 +1,5 @@
-use crossterm::event::KeyCode;
 use crate::app::{App, Mode, SearchDirection};
+use crossterm::event::KeyCode;
 
 /// Search for the next/previous match of `last_search`.
 pub fn search_next(app: &mut App, reverse: bool) {
@@ -13,7 +13,9 @@ pub fn search_next(app: &mut App, reverse: bool) {
 
     let query_lower = query.to_lowercase();
     let len = app.books.len();
-    if len == 0 { return; }
+    if len == 0 {
+        return;
+    }
 
     let forward = match (app.search_direction, reverse) {
         (SearchDirection::Forward, false) | (SearchDirection::Backward, true) => true,
@@ -21,7 +23,7 @@ pub fn search_next(app: &mut App, reverse: bool) {
     };
 
     let start = app.selected_index;
-    
+
     if forward {
         // Search forward from current+1, wrapping around
         for offset in 1..=len {

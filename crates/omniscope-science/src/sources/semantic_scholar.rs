@@ -23,7 +23,9 @@ const RECOMMENDATIONS_URL: &str = "https://api.semanticscholar.org/recommendatio
 const CACHE_TTL_SECS: u64 = 7 * 24 * 60 * 60;
 const DEFAULT_FIELDS: &str = "paperId,externalIds,title,abstract,year,authors,citationCount,referenceCount,influentialCitationCount,fieldsOfStudy,isOpenAccess,openAccessPdf,tldr";
 const SEARCH_FIELDS: &str = "paperId,title,year,authors,citationCount";
-const REFERENCE_FIELDS: &str = "paperId,externalIds,title,year,authors";
+const REFERENCE_FIELDS: &str =
+    "citedPaper.paperId,citedPaper.externalIds,citedPaper.title,citedPaper.year,citedPaper.authors";
+const CITATION_FIELDS: &str = "citingPaper.paperId,citingPaper.externalIds,citingPaper.title,citingPaper.year,citingPaper.authors";
 const API_KEY_HEADER: HeaderName = HeaderName::from_static("x-api-key");
 #[cfg(test)]
 static TEST_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -114,7 +116,10 @@ pub struct S2Reference {
 
 impl S2Reference {
     pub fn from_json(v: &Value) -> Self {
-        let source = v.get("citedPaper").unwrap_or(v);
+        let source = v
+            .get("citedPaper")
+            .or_else(|| v.get("citingPaper"))
+            .unwrap_or(v);
 
         let paper_id = source
             .get("paperId")
@@ -411,7 +416,7 @@ impl SemanticScholarSource {
     }
 
     pub async fn fetch_references(&self, id: &S2PaperId) -> Result<Vec<S2Reference>> {
-        let cache_key = format!("references:{}", id.as_str());
+        let cache_key = format!("references:v2:{}", id.as_str());
         if let Some(cached) = self.cache.get::<Vec<S2Reference>>(&cache_key).await {
             return Ok(cached);
         }
@@ -426,7 +431,8 @@ impl SemanticScholarSource {
             segs.push("references");
         }
         url.query_pairs_mut()
-            .append_pair("fields", REFERENCE_FIELDS);
+            .append_pair("fields", REFERENCE_FIELDS)
+            .append_pair("limit", "100");
 
         let body = self
             .client
@@ -450,6 +456,49 @@ impl SemanticScholarSource {
 
         self.cache.set(&cache_key, &references).await;
         Ok(references)
+    }
+
+    pub async fn fetch_citations(&self, id: &S2PaperId) -> Result<Vec<S2Reference>> {
+        let cache_key = format!("citations:v2:{}", id.as_str());
+        if let Some(cached) = self.cache.get::<Vec<S2Reference>>(&cache_key).await {
+            return Ok(cached);
+        }
+
+        let mut url = parse_base_url(&self.base_url)?;
+        {
+            let mut segs = url.path_segments_mut().map_err(|_| {
+                ScienceError::Parse("invalid Semantic Scholar base URL".to_string())
+            })?;
+            segs.push("paper");
+            segs.push(id.as_str());
+            segs.push("citations");
+        }
+        url.query_pairs_mut()
+            .append_pair("fields", CITATION_FIELDS)
+            .append_pair("limit", "100");
+
+        let body = self
+            .client
+            .get_with_headers(url.as_str(), self.auth_headers()?)
+            .await?;
+        let json: Value =
+            serde_json::from_str(&body).map_err(|e| ScienceError::Parse(e.to_string()))?;
+
+        let citations = json
+            .get("data")
+            .and_then(Value::as_array)
+            .or_else(|| json.as_array())
+            .map(|items| {
+                items
+                    .iter()
+                    .map(S2Reference::from_json)
+                    .filter(|reference| !reference.is_empty())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        self.cache.set(&cache_key, &citations).await;
+        Ok(citations)
     }
 
     pub async fn get_recommendations(&self, paper_id: &str) -> Result<Vec<S2Paper>> {
@@ -771,6 +820,33 @@ mod tests {
         );
         assert_eq!(parsed.title.as_deref(), Some("Attention Is All You Need"));
         assert_eq!(parsed.year, Some(2017));
+        assert_eq!(parsed.authors.len(), 1);
+        assert!(!parsed.is_empty());
+    }
+
+    #[test]
+    fn parses_reference_entry_from_citing_paper_payload() {
+        let value = json!({
+            "citingPaper": {
+                "paperId": "s2citing",
+                "externalIds": {
+                    "DOI": "10.1000/citing.1"
+                },
+                "title": "A Citing Paper",
+                "year": 2022,
+                "authors": [{"name": "Jane Roe"}]
+            }
+        });
+
+        let parsed = S2Reference::from_json(&value);
+
+        assert_eq!(parsed.paper_id.as_deref(), Some("s2citing"));
+        assert_eq!(
+            parsed.external_ids.get("DOI"),
+            Some(&"10.1000/citing.1".to_string())
+        );
+        assert_eq!(parsed.title.as_deref(), Some("A Citing Paper"));
+        assert_eq!(parsed.year, Some(2022));
         assert_eq!(parsed.authors.len(), 1);
         assert!(!parsed.is_empty());
     }

@@ -610,18 +610,16 @@ fn test_cs_cycles_status() {
     // cs should cycle status
     run_keys(&mut app, "cs");
 
-    // The popup should have opened OR the status should have changed
-    // Since 'cs' goes through pending mode → cycle_status directly
-    // (gs also does this)
-    run_keys(&mut app, "gs");
+    // gS should also cycle status (gs is used for related papers).
+    run_keys(&mut app, "gS");
     app.refresh_books();
 
-    // After gs, status should have changed from initial
+    // After gS, status should have changed from initial
     let new_status = app.books[app.selected_index].read_status.clone();
     assert_ne!(
         format!("{:?}", initial_status),
         format!("{:?}", new_status),
-        "gs should cycle the read status"
+        "gS should cycle the read status"
     );
 }
 
@@ -722,6 +720,42 @@ fn test_gr_opens_science_references_panel_for_scientific_book() {
 }
 
 #[test]
+fn test_preview_panel_r_opens_science_references() {
+    let (mut app, _temp) = create_test_app();
+    make_first_book_scientific(&mut app);
+    app.active_panel = crate::app::ActivePanel::Preview;
+
+    run_keys(&mut app, "r");
+
+    assert!(
+        matches!(
+            app.popup,
+            Some(crate::popup::Popup::ScienceReferences { .. })
+        ),
+        "r in Preview panel should open references instead of doing nothing"
+    );
+}
+
+#[test]
+fn test_preview_panel_jk_scrolls_right_column_without_changing_selection() {
+    let (mut app, _temp) = create_test_app();
+    make_first_book_scientific(&mut app);
+    app.active_panel = crate::app::ActivePanel::Preview;
+    let selected_before = app.selected_index;
+
+    run_keys(&mut app, "jjk");
+
+    assert_eq!(
+        app.selected_index, selected_before,
+        "j/k in Preview panel should not move list selection"
+    );
+    assert!(
+        app.preview_scroll > 0,
+        "j/k in Preview panel should update preview scroll"
+    );
+}
+
+#[test]
 fn test_g_r_opens_science_cited_by_panel() {
     let (mut app, _temp) = create_test_app();
     make_first_book_scientific(&mut app);
@@ -737,6 +771,33 @@ fn test_g_r_opens_science_cited_by_panel() {
         }
         _ => panic!("gR should open citation graph panel"),
     }
+}
+
+#[test]
+fn test_gs_opens_related_panel_without_status_cycle_conflict() {
+    let (mut app, _temp) = create_test_app();
+    make_first_book_scientific(&mut app);
+    let initial_status = app.books[app.selected_index].read_status.clone();
+
+    run_keys(&mut app, "gs");
+
+    match app.popup {
+        Some(crate::popup::Popup::ScienceCitationGraph(ref panel)) => {
+            assert_eq!(
+                panel.mode,
+                crate::panels::citation_graph::GraphMode::Related
+            );
+        }
+        _ => panic!("gs should open related citation panel"),
+    }
+
+    app.refresh_books();
+    let current_status = app.books[app.selected_index].read_status.clone();
+    assert_eq!(
+        format!("{:?}", initial_status),
+        format!("{:?}", current_status),
+        "gs should no longer cycle read status"
+    );
 }
 
 #[test]
@@ -777,7 +838,23 @@ fn test_at_e_triggers_ai_enrich_action() {
         app.status_message.contains("AI: enrich metadata"),
         "@e should trigger AI enrich metadata action"
     );
-    assert!(app.ai_panel_active);
+    assert!(
+        !app.ai_panel_active,
+        "AI panel should auto-close after action"
+    );
+}
+
+#[test]
+fn test_at_m_triggers_metadata_enrich_without_ai_panel() {
+    let (mut app, _temp) = create_test_app();
+
+    run_keys(&mut app, "@m");
+
+    assert!(
+        app.status_message.contains("Metadata enrich"),
+        "@m should trigger metadata enrichment without AI mode"
+    );
+    assert!(!app.ai_panel_active, "@m must not leave AI panel open");
 }
 
 #[test]

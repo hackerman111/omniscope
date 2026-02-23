@@ -3,10 +3,18 @@ use async_trait::async_trait;
 
 #[async_trait]
 pub trait ExternalSource: Send + Sync {
-    fn name() -> &'static str where Self: Sized;
-    fn source_type() -> SourceType where Self: Sized;
-    fn requires_auth() -> bool where Self: Sized;
-    fn rate_limit() -> RateLimit where Self: Sized;
+    fn name() -> &'static str
+    where
+        Self: Sized;
+    fn source_type() -> SourceType
+    where
+        Self: Sized;
+    fn requires_auth() -> bool
+    where
+        Self: Sized;
+    fn rate_limit() -> RateLimit
+    where
+        Self: Sized;
 
     async fn search(&self, query: &str) -> Result<Vec<SearchResult>>;
     async fn fetch_metadata(&self, id: &str) -> Result<Option<Metadata>>;
@@ -66,11 +74,11 @@ pub struct RateLimit {
     pub requests_per_second: f32,
 }
 
-pub mod crossref;
-pub mod semantic_scholar;
-pub mod openalex;
-pub mod unpaywall;
-pub mod openlibrary;
-pub mod core_ac;
 pub mod annas_archive;
+pub mod core_ac;
+pub mod crossref;
+pub mod openalex;
+pub mod openlibrary;
 pub mod scihub;
+pub mod semantic_scholar;
+pub mod unpaywall;

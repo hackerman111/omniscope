@@ -1,18 +1,28 @@
-use super::{App, Register, RegisterContent};
+use super::{App, MetadataTaskResult, MetadataTaskState, Register, RegisterContent};
 use crate::panels::citation_graph::{CitationEdge, CitationGraphPanel, GraphMode};
 use crate::panels::find_download::{FindDownloadPanel, FindResult, SearchIdentifierKind};
 use crate::panels::references::ReferencesPanel;
 use crate::popup::Popup;
-use omniscope_core::models::{BookCard, DocumentType};
+use chrono::Utc;
+use omniscope_core::models::{BookCard, BookPublication, DocumentType, ScientificIdentifiers};
 use omniscope_core::storage::json_cards;
-use omniscope_science::formats::bibtex::{generate_bibtex, BibTeXOptions};
+use omniscope_science::enrichment::EnrichmentPipeline;
+use omniscope_science::formats::bibtex::{BibTeXOptions, generate_bibtex};
 use omniscope_science::formats::csl::CslProcessor;
 use omniscope_science::identifiers::arxiv::ArxivId;
 use omniscope_science::identifiers::doi::Doi;
 use omniscope_science::identifiers::extract::{
     extract_arxiv_ids_from_text, extract_dois_from_text,
 };
-use omniscope_science::references::{ExtractedReference, ResolutionMethod};
+use omniscope_science::references::{
+    ExtractedReference, LibraryLookup, ReferenceExtractor, ResolutionMethod,
+};
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::mpsc;
+use std::sync::mpsc::TryRecvError;
+use std::thread;
+use std::time::Instant;
 use uuid::Uuid;
 
 impl App {
@@ -96,6 +106,35 @@ impl App {
         });
 
         let mut panel = FindDownloadPanel::new(inferred_query.unwrap_or_default());
+        let query_text = panel.query.trim().to_string();
+
+        if !query_text.is_empty() {
+            let query_doi = Doi::parse(query_text.as_str()).ok();
+            let query_arxiv = ArxivId::parse(query_text.as_str()).ok();
+
+            panel.semantic_scholar_results.push(FindResult {
+                title: query_text.clone(),
+                authors: Vec::new(),
+                year: None,
+                primary_id: query_doi
+                    .as_ref()
+                    .map(|value| format!("DOI:{}", value.normalized))
+                    .or_else(|| {
+                        query_arxiv
+                            .as_ref()
+                            .map(|value| format!("arXiv:{}", format_arxiv_for_storage(value)))
+                    }),
+                file_format: None,
+                file_size: None,
+                citation_count: None,
+                in_library: false,
+                open_url: query_doi
+                    .as_ref()
+                    .map(|value| value.url.clone())
+                    .or_else(|| query_arxiv.as_ref().map(|value| value.pdf_url.clone())),
+            });
+        }
+
         if let Some(card) = selected_card.as_ref() {
             panel.set_identifier_kind(match best_identifier_kind(card) {
                 Some(kind) => kind,
@@ -404,13 +443,216 @@ impl App {
     pub fn trigger_ai_enrich_metadata(&mut self) {
         self.ai_panel_active = true;
         self.ai_input = "@e enrich metadata".to_string();
-        self.status_message = "AI: enrich metadata queued".to_string();
+        self.run_metadata_enrichment("AI: enrich metadata");
+        self.ai_panel_active = false;
+    }
+
+    pub fn trigger_metadata_enrich(&mut self) {
+        self.run_metadata_enrichment("Metadata enrich");
+    }
+
+    fn run_metadata_enrichment(&mut self, status_prefix: &str) {
+        if self.metadata_task.is_some() {
+            self.status_message = format!("{status_prefix}: already running");
+            return;
+        }
+
+        let Some(selected) = self.selected_book() else {
+            self.status_message = format!("{status_prefix}: no selected book");
+            return;
+        };
+
+        let Ok(mut card) = json_cards::load_card_by_id(&self.cards_dir(), &selected.id) else {
+            self.status_message = format!("{status_prefix}: card not found");
+            return;
+        };
+
+        if card.file.is_none() {
+            self.status_message = format!("{status_prefix}: selected card has no file");
+            return;
+        }
+
+        let before = card.clone();
+        let (tx, rx) = mpsc::channel::<MetadataTaskResult>();
+        thread::spawn(move || {
+            let report = EnrichmentPipeline::enrich_full_metadata_blocking(&mut card);
+            let _ = tx.send(MetadataTaskResult::Completed {
+                before,
+                after: card,
+                report,
+            });
+        });
+
+        self.metadata_task = Some(MetadataTaskState {
+            receiver: rx,
+            started_at: Instant::now(),
+            spinner_frame: 0,
+            status_prefix: status_prefix.to_string(),
+        });
+        self.status_message =
+            format!("{status_prefix}: running... (large PDF files can take ~10-30s)");
+    }
+
+    pub fn poll_background_tasks(&mut self) {
+        let mut finished = None;
+        let mut disconnected = None;
+
+        if let Some(task) = self.metadata_task.as_mut() {
+            match task.receiver.try_recv() {
+                Ok(result) => {
+                    finished = Some((task.status_prefix.clone(), result));
+                }
+                Err(TryRecvError::Empty) => {
+                    task.spinner_frame = task.spinner_frame.wrapping_add(1);
+                    let frames = ["|", "/", "-", "\\"];
+                    let frame = frames[task.spinner_frame % frames.len()];
+                    let elapsed = task.started_at.elapsed().as_secs();
+                    self.status_message =
+                        format!("{}: running {frame} ({elapsed}s)", task.status_prefix);
+                }
+                Err(TryRecvError::Disconnected) => {
+                    disconnected = Some(task.status_prefix.clone());
+                }
+            }
+        }
+
+        if let Some(prefix) = disconnected {
+            self.metadata_task = None;
+            self.status_message = format!("{prefix}: worker thread disconnected");
+            return;
+        }
+
+        if let Some((status_prefix, result)) = finished {
+            self.metadata_task = None;
+            self.apply_metadata_task_result(&status_prefix, result);
+        }
+    }
+
+    fn apply_metadata_task_result(&mut self, status_prefix: &str, result: MetadataTaskResult) {
+        match result {
+            MetadataTaskResult::Failed(err) => {
+                self.status_message = format!("{status_prefix}: {err}");
+            }
+            MetadataTaskResult::Completed {
+                before,
+                after,
+                report,
+            } => {
+                if report.fields_updated.is_empty() {
+                    if let Some(first_error) = report.errors.first() {
+                        self.status_message =
+                            format!("{status_prefix}: no updates ({first_error})");
+                    } else {
+                        self.status_message = format!("{status_prefix}: no new fields found");
+                    }
+                    return;
+                }
+
+                self.push_undo(
+                    format!("{status_prefix}: {}", after.metadata.title),
+                    omniscope_core::undo::UndoAction::UpsertCards(vec![before]),
+                );
+
+                let cards_dir = self.cards_dir();
+                if let Err(err) = json_cards::save_card(&cards_dir, &after) {
+                    self.status_message = format!("{status_prefix}: save failed: {err}");
+                    return;
+                }
+                if let Some(ref db) = self.db {
+                    let _ = db.upsert_book(&after);
+                }
+                self.refresh_books();
+                let _ = self.select_book_by_id(after.id);
+
+                if report.errors.is_empty() {
+                    self.status_message = format!(
+                        "{status_prefix}: {} field(s) updated",
+                        report.fields_updated.len()
+                    );
+                } else {
+                    self.status_message = format!(
+                        "{status_prefix}: {} field(s) updated, {} warning(s)",
+                        report.fields_updated.len(),
+                        report.errors.len()
+                    );
+                }
+            }
+        }
     }
 
     pub fn trigger_ai_extract_references(&mut self) {
         self.ai_panel_active = true;
         self.ai_input = "@r extract references".to_string();
-        self.status_message = "AI: extract and resolve references queued".to_string();
+        self.run_reference_extraction("AI: extract references");
+        self.ai_panel_active = false;
+    }
+
+    fn run_reference_extraction(&mut self, status_prefix: &str) {
+        let Some(selected) = self.selected_book() else {
+            self.status_message = format!("{status_prefix}: no selected book");
+            return;
+        };
+
+        let cards_dir = self.cards_dir();
+        let Ok(mut card) = json_cards::load_card_by_id(&cards_dir, &selected.id) else {
+            self.status_message = format!("{status_prefix}: card not found");
+            return;
+        };
+
+        let all_cards = match json_cards::list_cards(&cards_dir) {
+            Ok(cards) => cards,
+            Err(err) => {
+                self.status_message =
+                    format!("{status_prefix}: failed to read library cards: {err}");
+                return;
+            }
+        };
+
+        let lookup = Arc::new(CardLibraryLookup::from_cards(&all_cards, Some(card.id)));
+        let extractor = ReferenceExtractor::from_env().with_library_lookup(lookup);
+        let references = match extractor.extract_blocking(&card) {
+            Ok(value) => value,
+            Err(err) => {
+                self.status_message = format!("{status_prefix}: extraction failed: {err}");
+                return;
+            }
+        };
+
+        if references.is_empty() {
+            self.status_message = format!("{status_prefix}: no references found");
+            return;
+        }
+
+        let before = card.clone();
+        let changed = apply_extracted_references(&mut card, &references);
+        if !changed {
+            self.status_message = format!("{status_prefix}: references are already up to date");
+            return;
+        }
+
+        self.push_undo(
+            format!("{status_prefix}: {}", card.metadata.title),
+            omniscope_core::undo::UndoAction::UpsertCards(vec![before]),
+        );
+
+        if let Err(err) = json_cards::save_card(&cards_dir, &card) {
+            self.status_message = format!("{status_prefix}: save failed: {err}");
+            return;
+        }
+        if let Some(ref db) = self.db {
+            let _ = db.upsert_book(&card);
+        }
+        self.refresh_books();
+
+        let linked_count = references
+            .iter()
+            .filter(|reference| reference.is_in_library.is_some())
+            .count();
+        self.status_message = format!(
+            "{status_prefix}: {} reference(s) extracted, {} linked to library",
+            references.len(),
+            linked_count
+        );
     }
 
     pub fn show_science_citation(&mut self, style: Option<&str>) {
@@ -478,6 +720,91 @@ impl App {
                 self.status_message = format!("Failed to open {label}: {err}");
             }
         }
+    }
+
+    pub fn add_science_entry_to_library(
+        &mut self,
+        title_hint: &str,
+        authors: &[String],
+        year: Option<i32>,
+        doi_hint: Option<&str>,
+        arxiv_hint: Option<&str>,
+        source_label: &str,
+    ) {
+        let doi = doi_hint
+            .and_then(|value| Doi::parse(value).ok())
+            .map(|value| value.normalized);
+        let arxiv_id = arxiv_hint
+            .and_then(|value| ArxivId::parse(value).ok())
+            .map(|value| format_arxiv_for_storage(&value));
+
+        if doi.is_none() && arxiv_id.is_none() {
+            self.status_message = format!("{source_label}: no DOI/arXiv on selected item");
+            return;
+        }
+
+        let cards_dir = self.cards_dir();
+        let cards = match json_cards::list_cards(&cards_dir) {
+            Ok(value) => value,
+            Err(err) => {
+                self.status_message =
+                    format!("{source_label}: failed to read library cards: {err}");
+                return;
+            }
+        };
+
+        if let Some(existing) = cards
+            .iter()
+            .find(|card| identifiers_match(card, doi.as_deref(), arxiv_id.as_deref()))
+        {
+            let _ = self.select_book_by_id(existing.id);
+            self.status_message = format!("{source_label}: already in library");
+            return;
+        }
+
+        let fallback_title = doi
+            .as_ref()
+            .map(|value| format!("DOI:{value}"))
+            .or_else(|| arxiv_id.as_ref().map(|value| format!("arXiv:{value}")))
+            .unwrap_or_else(|| "Untitled reference".to_string());
+        let title = title_hint.trim();
+
+        let mut card = BookCard::new(if title.is_empty() {
+            fallback_title.as_str()
+        } else {
+            title
+        });
+        card.metadata.authors = authors.to_vec();
+        card.metadata.year = year;
+        card.publication = Some(BookPublication {
+            doc_type: DocumentType::Article,
+            ..Default::default()
+        });
+        card.identifiers = Some(ScientificIdentifiers {
+            doi,
+            arxiv_id,
+            ..Default::default()
+        });
+
+        let report = EnrichmentPipeline::enrich_full_metadata_blocking(&mut card);
+        let card_id = card.id;
+        let saved_title = card.metadata.title.clone();
+
+        if let Err(err) = json_cards::save_card(&cards_dir, &card) {
+            self.status_message = format!("{source_label}: save failed: {err}");
+            return;
+        }
+        if let Some(ref db) = self.db {
+            let _ = db.upsert_book(&card);
+        }
+        self.refresh_books();
+        let _ = self.select_book_by_id(card_id);
+
+        self.status_message = format!(
+            "{source_label}: added \"{saved_title}\" ({} update(s), {} warning(s))",
+            report.fields_updated.len(),
+            report.errors.len()
+        );
     }
 
     fn selected_card(&self) -> Option<BookCard> {
@@ -726,10 +1053,157 @@ fn sanitize_reference_title(raw: &str) -> String {
         .or_else(|| trimmed.strip_prefix("arxiv:"))
         .unwrap_or(trimmed);
 
-    without_prefix.trim().to_string()
+    let without_identifiers = without_prefix
+        .split_once(" DOI:")
+        .map(|(head, _)| head)
+        .or_else(|| without_prefix.split_once(" doi:").map(|(head, _)| head))
+        .or_else(|| without_prefix.split_once(" arXiv:").map(|(head, _)| head))
+        .or_else(|| without_prefix.split_once(" arxiv:").map(|(head, _)| head))
+        .unwrap_or(without_prefix);
+
+    let cleaned = without_identifiers
+        .trim()
+        .trim_end_matches([',', ';', ':', '.', '-'])
+        .trim();
+    if cleaned.is_empty() {
+        trimmed.to_string()
+    } else {
+        cleaned.to_string()
+    }
 }
 
 fn short_uuid(id: Uuid) -> String {
     let text = id.to_string();
     text.chars().take(8).collect()
+}
+
+fn identifiers_match(card: &BookCard, doi: Option<&str>, arxiv_id: Option<&str>) -> bool {
+    let ids = match card.identifiers.as_ref() {
+        Some(value) => value,
+        None => return false,
+    };
+
+    let doi_match = match (doi, ids.doi.as_deref()) {
+        (Some(target), Some(existing)) => Doi::parse(existing)
+            .map(|parsed| parsed.normalized == target)
+            .unwrap_or_else(|_| existing.eq_ignore_ascii_case(target)),
+        _ => false,
+    };
+
+    let arxiv_match = match (arxiv_id, ids.arxiv_id.as_deref()) {
+        (Some(target), Some(existing)) => ArxivId::parse(existing)
+            .map(|parsed| format_arxiv_for_storage(&parsed) == target)
+            .unwrap_or_else(|_| existing.eq_ignore_ascii_case(target)),
+        _ => false,
+    };
+
+    doi_match || arxiv_match
+}
+
+fn apply_extracted_references(card: &mut BookCard, references: &[ExtractedReference]) -> bool {
+    let mut raw_references = Vec::new();
+    let mut source_ids = Vec::new();
+
+    for reference in references {
+        let raw = format_extracted_reference(reference);
+        if !raw.trim().is_empty() && !raw_references.contains(&raw) {
+            raw_references.push(raw);
+        }
+        if let Some(source_id) = reference.is_in_library
+            && !source_ids.contains(&source_id)
+        {
+            source_ids.push(source_id);
+        }
+    }
+
+    source_ids.sort_unstable();
+    let mut changed = false;
+
+    if card.citation_graph.references != raw_references {
+        card.citation_graph.references = raw_references;
+        changed = true;
+    }
+    if card.citation_graph.references_ids != source_ids {
+        card.citation_graph.references_ids = source_ids;
+        changed = true;
+    }
+
+    let extracted_count = u32::try_from(card.citation_graph.references.len()).unwrap_or(u32::MAX);
+    if card.citation_graph.reference_count < extracted_count {
+        card.citation_graph.reference_count = extracted_count;
+        changed = true;
+    }
+
+    if changed {
+        card.citation_graph.last_updated = Some(Utc::now());
+        card.touch();
+    }
+
+    changed
+}
+
+fn format_extracted_reference(reference: &ExtractedReference) -> String {
+    if let Some(doi) = &reference.doi {
+        return format!("DOI:{}", doi.normalized);
+    }
+    if let Some(arxiv_id) = &reference.arxiv_id {
+        return format!("arXiv:{}", format_arxiv_for_storage(arxiv_id));
+    }
+    reference
+        .resolved_title
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .unwrap_or_else(|| reference.raw_text.trim().to_string())
+}
+
+#[derive(Default)]
+struct CardLibraryLookup {
+    doi_to_book: HashMap<String, Uuid>,
+    arxiv_to_book: HashMap<String, Uuid>,
+}
+
+impl CardLibraryLookup {
+    fn from_cards(cards: &[BookCard], skip_id: Option<Uuid>) -> Self {
+        let mut lookup = Self::default();
+        for card in cards {
+            if skip_id.is_some_and(|id| id == card.id) {
+                continue;
+            }
+
+            let Some(identifiers) = card.identifiers.as_ref() else {
+                continue;
+            };
+
+            if let Some(doi_raw) = identifiers.doi.as_deref()
+                && let Ok(doi) = Doi::parse(doi_raw)
+            {
+                lookup
+                    .doi_to_book
+                    .entry(doi.normalized.clone())
+                    .or_insert(card.id);
+            }
+
+            if let Some(arxiv_raw) = identifiers.arxiv_id.as_deref()
+                && let Ok(arxiv_id) = ArxivId::parse(arxiv_raw)
+            {
+                let key = format_arxiv_for_storage(&arxiv_id);
+                lookup.arxiv_to_book.entry(key).or_insert(card.id);
+            }
+        }
+
+        lookup
+    }
+}
+
+impl LibraryLookup for CardLibraryLookup {
+    fn find_by_doi(&self, doi: &Doi) -> Option<Uuid> {
+        self.doi_to_book.get(&doi.normalized).copied()
+    }
+
+    fn find_by_arxiv(&self, arxiv_id: &ArxivId) -> Option<Uuid> {
+        let key = format_arxiv_for_storage(arxiv_id);
+        self.arxiv_to_book.get(&key).copied()
+    }
 }

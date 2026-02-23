@@ -52,11 +52,7 @@ impl Default for ScanOptions {
 /// Walks the library root (or a subdirectory), finds book files with
 /// recognized extensions, and compares against the database to find
 /// files that don't have cards yet.
-pub fn scan_library(
-    library: &LibraryRoot,
-    db: &Database,
-    opts: ScanOptions,
-) -> Result<ScanResult> {
+pub fn scan_library(library: &LibraryRoot, db: &Database, opts: ScanOptions) -> Result<ScanResult> {
     let scan_root = match &opts.subdirectory {
         Some(sub) => library.root().join(sub),
         None => library.root().to_path_buf(),
@@ -99,11 +95,7 @@ pub fn scan_library(
 }
 
 /// Create a card and persist it: write JSON, upsert into DB.
-fn create_card_from_import(
-    library: &LibraryRoot,
-    db: &Database,
-    card: BookCard,
-) -> Result<()> {
+fn create_card_from_import(library: &LibraryRoot, db: &Database, card: BookCard) -> Result<()> {
     // Write JSON card to .libr/cards/
     crate::storage::json_cards::save_card(&library.cards_dir(), &card)?;
 
@@ -118,7 +110,7 @@ fn create_card_from_import(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::init::{init_library, InitOptions};
+    use crate::storage::init::{InitOptions, init_library};
     use tempfile::TempDir;
 
     fn setup() -> (TempDir, LibraryRoot, Database) {

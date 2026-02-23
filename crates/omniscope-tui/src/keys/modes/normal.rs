@@ -8,6 +8,7 @@ use crate::keys::ext::science_bindings;
 use crate::keys::ext::sort;
 use crate::keys::ext::z_commands;
 use crate::keys::modes::search;
+use crate::panels::citation_graph::GraphMode;
 use crate::popup::Popup;
 use crossterm::event::{KeyCode, KeyModifiers};
 
@@ -34,6 +35,15 @@ pub(crate) fn handle_normal_mode(app: &mut App, code: KeyCode, modifiers: KeyMod
     // ── Handle pending key sequences (g, z, m, ', [, ], Space, S, f/F/t/T, @) ──
     if let Some(pending) = app.pending_key {
         handle_pending_sequence(app, pending, code);
+        return;
+    }
+
+    if modifiers == KeyModifiers::NONE
+        && app.active_panel == crate::app::ActivePanel::Preview
+        && app.has_science_context()
+        && handle_preview_science_shortcut(app, code)
+    {
+        app.reset_vim_count();
         return;
     }
 
@@ -148,6 +158,8 @@ pub(crate) fn handle_normal_mode(app: &mut App, code: KeyCode, modifiers: KeyMod
             app.reset_vim_count();
             if app.active_panel == crate::app::ActivePanel::Sidebar {
                 app.move_down_n(n);
+            } else if app.active_panel == crate::app::ActivePanel::Preview {
+                app.preview_scroll_down(n);
             } else {
                 if let Some(target) = motions::get_nav_target(app, 'j', n) {
                     app.selected_index = target;
@@ -159,6 +171,8 @@ pub(crate) fn handle_normal_mode(app: &mut App, code: KeyCode, modifiers: KeyMod
             app.reset_vim_count();
             if app.active_panel == crate::app::ActivePanel::Sidebar {
                 app.move_up_n(n);
+            } else if app.active_panel == crate::app::ActivePanel::Preview {
+                app.preview_scroll_up(n);
             } else {
                 if let Some(target) = motions::get_nav_target(app, 'k', n) {
                     app.selected_index = target;
@@ -573,5 +587,31 @@ fn replay_macro(app: &mut App, reg: char, count: usize) {
         app.status_message = format!("Replayed @{reg} ×{count}");
     } else {
         app.status_message = format!("Macro @{reg} is empty");
+    }
+}
+
+fn handle_preview_science_shortcut(app: &mut App, code: KeyCode) -> bool {
+    match code {
+        KeyCode::Char('r') => {
+            app.open_science_references_panel();
+            true
+        }
+        KeyCode::Char('c') => {
+            app.open_science_citation_graph_panel(GraphMode::CitedBy);
+            true
+        }
+        KeyCode::Char('o') => {
+            app.find_science_open_pdf();
+            true
+        }
+        KeyCode::Char('f') => {
+            app.open_science_find_download_panel(None);
+            true
+        }
+        KeyCode::Char('e') => {
+            app.show_science_bibtex();
+            true
+        }
+        _ => false,
     }
 }

@@ -1,9 +1,14 @@
 use std::collections::HashSet;
+use std::fs;
 use std::path::Path;
 use std::process::Command;
+use std::thread;
+use std::time::{Duration, Instant};
 
+use lopdf::Document;
 use once_cell::sync::Lazy;
 use regex::Regex;
+use uuid::Uuid;
 
 use crate::error::{Result, ScienceError};
 use crate::identifiers::{arxiv::ArxivId, doi::Doi, isbn::Isbn};
@@ -136,14 +141,66 @@ pub fn find_arxiv_id_in_pdf(pdf_path: &Path) -> Result<ArxivId> {
 }
 
 fn extract_pdf_first_pages_text(pdf_path: &Path) -> Result<String> {
-    let output = Command::new("pdftotext")
+    let lopdf_error = match extract_pdf_first_pages_text_with_lopdf(pdf_path, 2) {
+        Ok(text) if !text.trim().is_empty() => return Ok(text),
+        Ok(_) => Some("lopdf extracted empty text from first pages".to_string()),
+        Err(err) => Some(err.to_string()),
+    };
+
+    match extract_pdf_first_pages_text_with_pdftotext(pdf_path) {
+        Ok(text) if !text.trim().is_empty() => Ok(text),
+        Ok(_) => Err(ScienceError::PdfExtraction(
+            "pdftotext extracted empty text from first pages".to_string(),
+        )),
+        Err(pdftotext_error) => {
+            let prefix = lopdf_error.unwrap_or_else(|| "lopdf extraction failed".to_string());
+            Err(ScienceError::PdfExtraction(format!(
+                "{prefix}; {pdftotext_error}"
+            )))
+        }
+    }
+}
+
+fn extract_pdf_first_pages_text_with_lopdf(pdf_path: &Path, max_pages: usize) -> Result<String> {
+    if max_pages == 0 {
+        return Ok(String::new());
+    }
+
+    let document = Document::load(pdf_path).map_err(|err| {
+        ScienceError::PdfExtraction(format!(
+            "lopdf failed to open {}: {err}",
+            pdf_path.display()
+        ))
+    })?;
+    let pages = document.get_pages();
+    if pages.is_empty() {
+        return Ok(String::new());
+    }
+    let page_numbers = pages.keys().copied().take(max_pages).collect::<Vec<u32>>();
+
+    document.extract_text(&page_numbers).map_err(|err| {
+        ScienceError::PdfExtraction(format!(
+            "lopdf failed to extract text from {}: {err}",
+            pdf_path.display()
+        ))
+    })
+}
+
+fn extract_pdf_first_pages_text_with_pdftotext(pdf_path: &Path) -> Result<String> {
+    let output_path = std::env::temp_dir().join(format!(
+        "omniscope_pdftotext_{}_{}.txt",
+        std::process::id(),
+        Uuid::now_v7()
+    ));
+
+    let mut child = Command::new("pdftotext")
         .arg("-f")
         .arg("1")
         .arg("-l")
         .arg("2")
         .arg(pdf_path)
-        .arg("-")
-        .output()
+        .arg(&output_path)
+        .spawn()
         .map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 ScienceError::PdfExtraction("pdftotext is not installed".to_string())
@@ -152,19 +209,48 @@ fn extract_pdf_first_pages_text(pdf_path: &Path) -> Result<String> {
             }
         })?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        let message = if stderr.is_empty() {
-            "pdftotext failed without stderr output".to_string()
-        } else {
-            format!("pdftotext failed: {stderr}")
-        };
-        return Err(ScienceError::PdfExtraction(message));
+    let deadline = Duration::from_secs(8);
+    let started = Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {
+                if started.elapsed() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    let _ = fs::remove_file(&output_path);
+                    return Err(ScienceError::PdfExtraction(
+                        "pdftotext timed out while reading first pages".to_string(),
+                    ));
+                }
+                thread::sleep(Duration::from_millis(50));
+            }
+            Err(err) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                let _ = fs::remove_file(&output_path);
+                return Err(ScienceError::PdfExtraction(format!(
+                    "pdftotext process failed: {err}"
+                )));
+            }
+        }
+    };
+
+    if !status.success() {
+        let _ = fs::remove_file(&output_path);
+        return Err(ScienceError::PdfExtraction(format!(
+            "pdftotext exited with status {status}"
+        )));
     }
 
-    String::from_utf8(output.stdout).map_err(|e| {
-        ScienceError::PdfExtraction(format!("pdftotext returned non-UTF8 output: {e}"))
-    })
+    let text = fs::read_to_string(&output_path).map_err(|err| {
+        ScienceError::PdfExtraction(format!(
+            "failed to read pdftotext output {}: {err}",
+            output_path.display()
+        ))
+    })?;
+    let _ = fs::remove_file(&output_path);
+    Ok(text)
 }
 
 fn trim_trailing_punctuation(value: &str) -> &str {

@@ -1,8 +1,8 @@
+use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, List, ListItem, Paragraph};
-use ratatui::Frame;
 
 use crate::app::{ActivePanel, App, Mode};
 
@@ -64,10 +64,10 @@ pub fn render(frame: &mut Frame, app: &App, area: Rect) {
             let is_selected = i == app.selected_index;
             let is_visual = app.visual_selections.contains(&i);
 
-            let mark_char =
-                app.marks
-                    .iter()
-                    .find_map(|(&c, &idx)| if idx == i { Some(c) } else { None });
+            let mark_char = app
+                .marks
+                .iter()
+                .find_map(|(&c, &idx)| if idx == i { Some(c) } else { None });
 
             let prefix_str = if is_selected && is_focused {
                 "▶ ".to_string()

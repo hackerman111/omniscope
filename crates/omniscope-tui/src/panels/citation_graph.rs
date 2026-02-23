@@ -1,11 +1,11 @@
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use omniscope_core::models::BookCard;
 use omniscope_science::identifiers::{arxiv::ArxivId, doi::Doi};
+use ratatui::Frame;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
-use ratatui::Frame;
 use uuid::Uuid;
 
 use crate::theme::NordTheme;
@@ -334,9 +334,14 @@ impl CitationGraphPanel {
 
         match self.mode {
             GraphMode::References => {
+                let references_total = self
+                    .book
+                    .citation_graph
+                    .reference_count
+                    .max(u32::try_from(edge_count).unwrap_or(u32::MAX));
                 lines.push((
                     styled_line(
-                        format!("├── cites ({edge_count})"),
+                        format!("├── cites ({references_total})"),
                         max_width,
                         Style::default().fg(theme.muted()),
                     ),
@@ -344,9 +349,14 @@ impl CitationGraphPanel {
                 ));
 
                 if edge_count == 0 {
+                    let empty_text = if references_total > 0 {
+                        format!("│   └── ({references_total} total, sample unavailable)")
+                    } else {
+                        "│   └── (no references)".to_string()
+                    };
                     lines.push((
                         styled_line(
-                            "│   └── (no references)".to_string(),
+                            empty_text,
                             max_width,
                             Style::default()
                                 .fg(theme.muted())
@@ -383,9 +393,14 @@ impl CitationGraphPanel {
                 ));
 
                 if edge_count == 0 {
+                    let empty_text = if cited_by_count > 0 {
+                        format!("    └── ({cited_by_count} total, sample unavailable)")
+                    } else {
+                        "    └── (no citations found)".to_string()
+                    };
                     lines.push((
                         styled_line(
-                            "    └── (no citations found)".to_string(),
+                            empty_text,
                             max_width,
                             Style::default()
                                 .fg(theme.muted())
@@ -759,9 +774,11 @@ mod tests {
             .map(|(line, _)| line_text(&line))
             .collect::<Vec<_>>();
 
-        assert!(lines
-            .iter()
-            .any(|line| line.contains("◉ Attention Is All You Need (2017)")));
+        assert!(
+            lines
+                .iter()
+                .any(|line| line.contains("◉ Attention Is All You Need (2017)"))
+        );
         assert!(lines.iter().any(|line| line.contains("├── cites")));
         assert!(lines.iter().any(|line| line.contains("│   ├── [✓]")));
         assert!(lines.iter().any(|line| line.contains("│   └── [✗]")));

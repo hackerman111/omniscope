@@ -10,8 +10,11 @@ use crate::keys::ui::macro_recorder::MacroRecorder;
 use crate::popup::Popup;
 use crate::theme::NordTheme;
 use omniscope_core::{
-    undo::UndoEntry, AppConfig, BookCard, BookSummaryView, Database, FuzzySearcher, LibraryRoot,
+    AppConfig, BookCard, BookSummaryView, Database, FuzzySearcher, LibraryRoot, undo::UndoEntry,
 };
+use omniscope_science::enrichment::EnrichmentReport;
+use std::sync::mpsc::Receiver;
+use std::time::Instant;
 
 /// Search direction for `/` and `?` searches.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -128,6 +131,22 @@ pub enum SidebarItem {
     Tag { name: String, count: u32 },
     FolderHeader,
     Folder { path: String },
+}
+
+pub enum MetadataTaskResult {
+    Completed {
+        before: BookCard,
+        after: BookCard,
+        report: EnrichmentReport,
+    },
+    Failed(String),
+}
+
+pub struct MetadataTaskState {
+    pub receiver: Receiver<MetadataTaskResult>,
+    pub started_at: Instant,
+    pub spinner_frame: usize,
+    pub status_prefix: String,
 }
 
 /// Main application state.
@@ -273,6 +292,12 @@ pub struct App {
 
     /// Path to open in $EDITOR (requires terminal suspension, handled by main loop).
     pub pending_editor_path: Option<String>,
+
+    /// Scroll offset for the right preview panel content.
+    pub preview_scroll: usize,
+
+    /// Background metadata enrichment task (if currently running).
+    pub metadata_task: Option<MetadataTaskState>,
 }
 
 impl App {
@@ -367,6 +392,8 @@ impl App {
             theme: NordTheme::default(),
             clipboard: arboard::Clipboard::new().ok(),
             pending_editor_path: None,
+            preview_scroll: 0,
+            metadata_task: None,
         };
 
         app.refresh_sidebar();

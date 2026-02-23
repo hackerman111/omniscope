@@ -282,7 +282,7 @@ fn scan_untracked_files(library: &LibraryRoot, db: &Database) -> Result<Vec<Path
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::init::{init_library, InitOptions};
+    use crate::storage::init::{InitOptions, init_library};
     use tempfile::TempDir;
 
     #[test]

@@ -64,8 +64,8 @@ pub fn handle_g_command(app: &mut App, code: KeyCode) {
             }
         }
 
-        // gs — cycle status
-        KeyCode::Char('s') => {
+        // gS — cycle status
+        KeyCode::Char('S') => {
             app.cycle_status();
         }
 

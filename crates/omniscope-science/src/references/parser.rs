@@ -16,14 +16,22 @@ static SECTION_END_RE: Lazy<Regex> = Lazy::new(|| {
 });
 
 static NUMBERED_REFERENCE_RE: Lazy<Regex> = Lazy::new(|| {
-    Regex::new(r"^\s*(?:\[\d+\]|\d+[.)])\s*").expect("valid numbered reference regex")
+    Regex::new(r"^\s*(?:\[\d+\]|\(\d+\)|\d+[.)\]])\s*").expect("valid numbered reference regex")
 });
 
 static EMPTY_LINE_SPLIT_RE: Lazy<Regex> =
     Lazy::new(|| Regex::new(r"\n\s*\n+").expect("valid empty-line split regex"));
+static NUMBERED_REFERENCE_BLOCK_RE: Lazy<Regex> = Lazy::new(|| {
+    Regex::new(r"(?m)^\s*(?:\[\d+\]|\(\d+\)|\d+[.)\]])\s+")
+        .expect("valid numbered reference block regex")
+});
+static REFERENCE_YEAR_RE: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"\b(19|20)\d{2}\b").expect("valid reference year regex"));
 
 pub fn find_references_section(text: &str) -> Option<&str> {
-    let heading_match = REFERENCES_HEADING_RE.find(text)?;
+    let Some(heading_match) = REFERENCES_HEADING_RE.find(text) else {
+        return fallback_references_section_without_heading(text);
+    };
 
     let mut section_start = heading_match.end();
     while let Some(ch) = text[section_start..].chars().next() {
@@ -41,6 +49,28 @@ pub fn find_references_section(text: &str) -> Option<&str> {
         .unwrap_or(tail.len());
     let section = &tail[..section_end];
 
+    if section.trim().is_empty() {
+        None
+    } else {
+        Some(section)
+    }
+}
+
+fn fallback_references_section_without_heading(text: &str) -> Option<&str> {
+    if text.trim().is_empty() {
+        return None;
+    }
+
+    let matches = NUMBERED_REFERENCE_BLOCK_RE
+        .find_iter(text)
+        .collect::<Vec<_>>();
+    if matches.len() < 2 {
+        return None;
+    }
+
+    let start_idx = matches.len().saturating_sub(12);
+
+    let section = &text[matches[start_idx].start()..];
     if section.trim().is_empty() {
         None
     } else {
@@ -99,11 +129,54 @@ fn parse_numbered_references(section: &str) -> Vec<String> {
 }
 
 fn parse_unnumbered_references(section: &str) -> Vec<String> {
-    EMPTY_LINE_SPLIT_RE
+    let entries = EMPTY_LINE_SPLIT_RE
         .split(section)
         .map(normalize_whitespace)
         .filter(|entry| entry.chars().count() > 20)
-        .collect()
+        .collect::<Vec<_>>();
+    if entries.len() >= 2 {
+        return entries;
+    }
+
+    let mut parsed = Vec::new();
+    let mut current = String::new();
+    for line in section.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            if !current.is_empty() {
+                push_reference(&mut parsed, &mut current);
+            }
+            continue;
+        }
+
+        if !current.is_empty() && looks_like_unnumbered_reference_start(trimmed) {
+            push_reference(&mut parsed, &mut current);
+        } else if !current.is_empty() {
+            current.push(' ');
+        }
+        current.push_str(trimmed);
+    }
+
+    if !current.is_empty() {
+        push_reference(&mut parsed, &mut current);
+    }
+
+    if parsed.len() >= entries.len() {
+        parsed
+    } else {
+        entries
+    }
+}
+
+fn looks_like_unnumbered_reference_start(line: &str) -> bool {
+    let has_year = REFERENCE_YEAR_RE.is_match(line);
+    let starts_with_letter = line
+        .chars()
+        .next()
+        .map(|ch| ch.is_ascii_alphabetic())
+        .unwrap_or(false);
+    let has_author_separator = line.contains(',') || line.contains(" and ") || line.contains('&');
+    starts_with_letter && has_year && has_author_separator
 }
 
 fn push_reference(entries: &mut Vec<String>, current: &mut String) {
@@ -173,5 +246,35 @@ Extra material that must not be parsed as references.
 
         let refs = parse_reference_lines(section);
         assert_eq!(refs.len(), 2);
+    }
+
+    #[test]
+    fn falls_back_to_tail_numbered_block_without_heading() {
+        let text = r#"
+Main body text.
+Some conclusion.
+
+[1] Goodfellow, I. et al. Deep Learning. MIT Press, 2016.
+[2] LeCun, Y., Bengio, Y., Hinton, G. Deep learning. Nature, 2015.
+[3] Srivastava, N. et al. Dropout: A Simple Way to Prevent Neural Networks from Overfitting.
+"#;
+
+        let section = find_references_section(text).expect("fallback section should be found");
+        let refs = parse_reference_lines(section);
+        assert_eq!(refs.len(), 3);
+        assert!(refs[0].contains("Deep Learning"));
+    }
+
+    #[test]
+    fn parses_compact_unnumbered_references_without_blank_lines() {
+        let section = r#"
+Goodfellow, I., Bengio, Y., and Courville, A. (2016). Deep Learning. MIT Press.
+LeCun, Y., Bengio, Y., and Hinton, G. (2015). Deep learning. Nature.
+Srivastava, N., Hinton, G., et al. (2014). Dropout: A Simple Way to Prevent Neural Networks from Overfitting.
+"#;
+
+        let refs = parse_reference_lines(section);
+        assert_eq!(refs.len(), 3);
+        assert!(refs[1].contains("Nature"));
     }
 }

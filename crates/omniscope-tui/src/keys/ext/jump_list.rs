@@ -44,16 +44,16 @@ impl JumpList {
     pub fn push(&mut self, index: usize, book_id: String) {
         // If we are not at the end, truncate future?
         if self.current < self.jumps.len() {
-             self.jumps.truncate(self.current + 1);
+            self.jumps.truncate(self.current + 1);
         }
-        
+
         // Avoid duplicates at top
         if let Some(last) = self.jumps.last() {
             if last.index == index && last.book_id == book_id {
                 return;
             }
         }
-        
+
         self.jumps.push(JumpLoc { index, book_id });
         if self.jumps.len() > 100 {
             self.jumps.remove(0);
