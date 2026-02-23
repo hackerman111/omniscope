@@ -13,6 +13,7 @@ use serde_json::{Value, json};
 
 use crate::error::{Result, ScienceError};
 use crate::http::{DiskCache, RateLimitedClient};
+use crate::identifiers::{arxiv::ArxivId, doi::Doi};
 use crate::sources::{
     DownloadUrl, ExternalSource, Metadata, RateLimit, SearchResult, SourceStatus, SourceType,
 };
@@ -33,6 +34,14 @@ pub struct S2PaperId(String);
 impl S2PaperId {
     pub fn new(id: impl Into<String>) -> Self {
         Self(id.into())
+    }
+
+    pub fn from_doi(doi: &Doi) -> Self {
+        Self::new(format!("DOI:{}", doi.normalized))
+    }
+
+    pub fn from_arxiv(arxiv_id: &ArxivId) -> Self {
+        Self::new(format!("ArXiv:{}", arxiv_id.id))
     }
 
     pub fn as_str(&self) -> &str {
