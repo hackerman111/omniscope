@@ -4,6 +4,7 @@ pub mod popup;
 pub mod ui;
 pub mod keys;
 pub mod command;
+pub mod panels;
 pub mod theme;
 
 use std::io;

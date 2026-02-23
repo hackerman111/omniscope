@@ -7,6 +7,7 @@ description = "TUI interface for Omniscope book manager"
 
 [dependencies]
 omniscope-core = { workspace = true }
+omniscope-science = { path = "../omniscope-science" }
 ratatui = { workspace = true }
 crossterm = { workspace = true }
 tokio = { workspace = true }
