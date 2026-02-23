@@ -18,6 +18,7 @@ pub trait BookRepository: Repository<Entity = BookCard, Id = Uuid> {
     fn get_all_authors(&self) -> Result<Vec<String>>;
     fn update_frecency(&self, id: &Uuid, score: f64) -> Result<()>;
     fn list_all_file_paths(&self) -> Result<Vec<String>>;
+    fn list_with_arxiv_id(&self) -> Result<Vec<BookCard>>;
 }
 
 pub struct SqliteBookRepository<'a> {
@@ -270,6 +271,24 @@ impl<'a> BookRepository for SqliteBookRepository<'a> {
         let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
         rows.collect::<std::result::Result<Vec<_>, _>>().map_err(Into::into)
     }
+
+    fn list_with_arxiv_id(&self) -> Result<Vec<BookCard>> {
+        let mut stmt = self.conn.prepare("SELECT id FROM books WHERE arxiv_id IS NOT NULL")?;
+        let rows = stmt.query_map([], |row| {
+            let id_str: String = row.get(0)?;
+            Ok(Uuid::parse_str(&id_str).unwrap_or_default())
+        })?;
+
+        let mut cards = Vec::new();
+        for id_result in rows {
+            if let Ok(id) = id_result {
+                if let Ok(Some(card)) = self.find_by_id(&id) {
+                    cards.push(card);
+                }
+            }
+        }
+        Ok(cards)
+    }
 }
 
 #[cfg(feature = "async")]
@@ -354,6 +373,10 @@ pub mod async_impl {
         }
 
         fn list_all_file_paths(&self) -> Result<Vec<String>> {
+            unimplemented!("Use async methods with async repository")
+        }
+
+        fn list_with_arxiv_id(&self) -> Result<Vec<BookCard>> {
             unimplemented!("Use async methods with async repository")
         }
     }

@@ -89,6 +89,31 @@ impl Default for ArxivClient {
     }
 }
 
+impl ArxivClient {
+    pub async fn check_for_updates(
+        &self,
+        id: &ArxivId,
+        current_version: Option<u8>,
+    ) -> Result<Option<ArxivMetadata>> {
+        let metadata = self.fetch_metadata(id).await?;
+        
+        // If the local database has no concept of version, OR
+        // the remote version is strictly greater than our local version,
+        // we consider it an update.
+        let has_update = match (metadata.arxiv_id.version, current_version) {
+            (Some(remote), Some(local)) => remote > local,
+            (Some(_remote), None) => true,
+            _ => false,
+        };
+
+        if has_update {
+            Ok(Some(metadata))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

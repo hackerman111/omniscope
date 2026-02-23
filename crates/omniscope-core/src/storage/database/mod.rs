@@ -250,6 +250,12 @@ impl Database {
         let repo = super::repositories::SqliteBookRepository::new(conn);
         repo.list_all_file_paths()
     }
+
+    pub fn list_books_with_arxiv_id(&self) -> Result<Vec<BookCard>> {
+        let conn = self.pool.get_connection();
+        let repo = super::repositories::SqliteBookRepository::new(conn);
+        repo.list_with_arxiv_id()
+    }
 }
 
 #[cfg(feature = "async")]
