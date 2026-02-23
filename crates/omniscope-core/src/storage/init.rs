@@ -5,6 +5,7 @@ use crate::models::manifest::LibraryManifest;
 use crate::storage::library_root::LibraryRoot;
 
 /// Options for `init_library`.
+#[derive(Default)]
 pub struct InitOptions {
     /// Custom name for the library (defaults to directory name).
     pub name: Option<String>,
@@ -12,16 +13,6 @@ pub struct InitOptions {
     pub create_dir: bool,
     /// Scan existing files and create cards after init.
     pub scan_existing: bool,
-}
-
-impl Default for InitOptions {
-    fn default() -> Self {
-        Self {
-            name: None,
-            create_dir: false,
-            scan_existing: false,
-        }
-    }
 }
 
 impl InitOptions {

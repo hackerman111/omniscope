@@ -32,7 +32,7 @@ impl<'a> Repository for SqliteTagRepository<'a> {
         for row in rows {
             let tags_str = row?;
             if let Ok(tags) = serde_json::from_str::<Vec<String>>(&tags_str) {
-                for tag in tags {
+                if let Some(tag) = tags.into_iter().next() {
                     return Ok(Some(Tag::new(tag)));
                 }
             }

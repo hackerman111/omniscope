@@ -179,11 +179,11 @@ mod tests {
         let mut server = Server::new_async().await;
         let base_url = server.url();
 
-        let _m = server.mock("GET", "/10.1038/nature14539?email=test@example.com")
+        let _m = server.mock("GET", "/10.9999/test-unpaywall-flaky-fix?email=test@example.com")
             .with_status(200)
             .with_header("content-type", "application/json")
             .with_body(r#"{
-                "doi": "10.1038/nature14539",
+                "doi": "10.9999/test-unpaywall-flaky-fix",
                 "is_oa": true,
                 "oa_status": "gold",
                 "title": "Human-level control through deep reinforcement learning",
@@ -205,7 +205,7 @@ mod tests {
             Duration::from_secs(0),
             "test@example.com".to_string(),
         );
-        let doi = Doi::parse("10.1038/nature14539").unwrap();
+        let doi = Doi::parse("10.9999/test-unpaywall-flaky-fix").unwrap();
         let result = source.check_oa(&doi).await.unwrap();
 
         assert!(result.is_oa);

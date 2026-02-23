@@ -43,7 +43,7 @@ impl Default for GlobalSettings {
 /// - AI provider credentials
 /// - Search engine settings
 /// - Known library registry
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct GlobalConfig {
     pub global: GlobalSettings,
@@ -54,20 +54,6 @@ pub struct GlobalConfig {
     pub server: ServerConfig,
     #[serde(default)]
     pub libraries: Vec<KnownLibrary>,
-}
-
-impl Default for GlobalConfig {
-    fn default() -> Self {
-        Self {
-            global: GlobalSettings::default(),
-            ui: UiConfig::default(),
-            ai: AiConfig::default(),
-            search: SearchConfig::default(),
-            viewers: ViewersConfig::default(),
-            server: ServerConfig::default(),
-            libraries: Vec::new(),
-        }
-    }
 }
 
 impl GlobalConfig {
@@ -159,7 +145,7 @@ impl GlobalConfig {
 /// Legacy compatibility: this struct still has `core.library_path` so that
 /// code that hasn't been migrated to `LibraryRoot` yet continues to work.
 /// New code should use `LibraryRoot` directly for path derivation.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct AppConfig {
     pub core: CoreConfig,
@@ -241,18 +227,7 @@ pub struct ServerConfig {
 
 // ─── Defaults ──────────────────────────────────────────────
 
-impl Default for AppConfig {
-    fn default() -> Self {
-        Self {
-            core: CoreConfig::default(),
-            ui: UiConfig::default(),
-            ai: AiConfig::default(),
-            search: SearchConfig::default(),
-            viewers: ViewersConfig::default(),
-            server: ServerConfig::default(),
-        }
-    }
-}
+
 
 impl Default for CoreConfig {
     fn default() -> Self {

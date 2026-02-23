@@ -64,6 +64,7 @@ impl FolderTemplate {
     }
 
     /// Parse a template name from a string.
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "research" => Some(Self::Research),
@@ -255,6 +256,7 @@ fn scan_dirs_recursive(root: &Path, current: &Path, result: &mut Vec<String>) ->
 }
 
 /// Find files on disk that have no corresponding card in the database.
+#[allow(clippy::collapsible_if)]
 fn scan_untracked_files(library: &LibraryRoot, db: &Database) -> Result<Vec<PathBuf>> {
     let root = library.root();
 

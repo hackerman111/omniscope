@@ -77,7 +77,7 @@ impl Default for FuzzySearcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::models::{BookCard, ReadStatus};
+    use crate::models::BookCard;
 
     fn make_summary(title: &str, authors: &[&str], tags: &[&str]) -> BookSummaryView {
         let mut card = BookCard::new(title);

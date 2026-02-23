@@ -21,9 +21,7 @@ pub fn import_file(path: &Path) -> Result<BookCard> {
         .file_stem()
         .map(|s| {
             s.to_string_lossy()
-                .replace('_', " ")
-                .replace('-', " ")
-                .replace('.', " ")
+                .replace(['_', '-', '.'], " ")
                 .trim()
                 .to_string()
         })
@@ -62,6 +60,7 @@ pub fn import_file(path: &Path) -> Result<BookCard> {
 }
 
 /// Scan a directory for book files and import them.
+#[allow(clippy::collapsible_if)]
 pub fn scan_directory(dir: &Path, recursive: bool) -> Result<Vec<BookCard>> {
     let mut cards = Vec::new();
 

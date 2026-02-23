@@ -206,6 +206,7 @@ fn parse_token(token: &str) -> Option<SearchFilter> {
     None
 }
 
+#[allow(clippy::collapsible_if)]
 fn parse_year_filter(s: &str) -> Option<YearFilter> {
     // y:>2020
     if let Some(rest) = s.strip_prefix(">=") {
@@ -250,13 +251,7 @@ fn parse_rating_filter(s: &str) -> Option<CompareOp> {
         return rest.parse().ok().map(CompareOp::Lt);
     }
     // Plain number: treat as >=
-    s.parse().ok().map(|v| {
-        if s.ends_with('+') {
-            CompareOp::Gte(v)
-        } else {
-            CompareOp::Gte(v)
-        }
-    })
+    s.parse().ok().map(|v| CompareOp::Gte(v))
 }
 
 fn filter_matches(filter: &SearchFilter, book: &BookSummaryView) -> bool {

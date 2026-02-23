@@ -1,154 +1,279 @@
+use std::collections::{HashMap, HashSet};
+use uuid::Uuid;
+
 use omniscope_core::models::book::BookCard;
+use crate::error::Result;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DedupStrategy {
+    ByDoi,
+    ByIsbn,
+    ByTitleFuzzy,
+}
+
+#[derive(Debug, Clone)]
+pub struct DuplicateGroup {
+    pub canonical: Uuid,
+    pub duplicates: Vec<Uuid>,
+    pub strategy: DedupStrategy,
+}
 
 pub struct DuplicateFinder;
 
 impl DuplicateFinder {
-    /// Returns a similarity score between 0.0 and 1.0.
-    /// 1.0 means certain duplicate.
-    pub fn similarity(a: &BookCard, b: &BookCard) -> f32 {
-        // 1. Strict identifier matches
-        if let (Some(ids_a), Some(ids_b)) = (&a.identifiers, &b.identifiers) {
-            if let (Some(doi_a), Some(doi_b)) = (&ids_a.doi, &ids_b.doi) {
-                if doi_a.to_lowercase() == doi_b.to_lowercase() {
-                    return 1.0;
-                }
-            }
-            if let (Some(arxiv_a), Some(arxiv_b)) = (&ids_a.arxiv_id, &ids_b.arxiv_id) {
-                if arxiv_a.to_lowercase() == arxiv_b.to_lowercase() {
-                    return 1.0;
-                }
-            }
-        }
+    /// Group books by identical normalized DOI.
+    pub fn find_by_doi(books: &[BookCard]) -> Vec<DuplicateGroup> {
+        let mut groups: HashMap<String, Vec<&BookCard>> = HashMap::new();
 
-        // ISBN match
-        for isbn_a in &a.metadata.isbn {
-            for isbn_b in &b.metadata.isbn {
-                if isbn_a == isbn_b {
-                    return 1.0;
+        for book in books {
+            if let Some(ids) = &book.identifiers {
+                if let Some(doi) = &ids.doi {
+                    let normalized = crate::identifiers::doi::Doi::parse(doi)
+                        .map(|d| d.normalized)
+                        .unwrap_or_else(|_| doi.clone());
+                    groups
+                        .entry(normalized.to_lowercase())
+                        .or_default()
+                        .push(book);
                 }
             }
         }
 
-        // 2. Fuzzy matching
-        let mut score = 0.0;
-
-        // Title similarity
-        let title_sim = title_similarity(&a.metadata.title, &b.metadata.title);
-        if title_sim > 0.9 {
-            score += 0.7;
-        } else if title_sim > 0.7 {
-            score += 0.4;
-        }
-
-        // Year match
-        if let (Some(y_a), Some(y_b)) = (a.metadata.year, b.metadata.year) {
-            if y_a == y_b {
-                score += 0.2;
-            } else if (y_a - y_b).abs() <= 1 {
-                score += 0.1;
-            } else {
-                score -= 0.2;
-            }
-        }
-
-        // Author overlap
-        let author_sim = author_similarity(&a.metadata.authors, &b.metadata.authors);
-        score += author_sim * 0.3;
-
-        score.clamp(0.0, 1.0)
+        Self::build_groups(groups, DedupStrategy::ByDoi)
     }
 
-    pub fn is_duplicate(a: &BookCard, b: &BookCard) -> bool {
-        Self::similarity(a, b) > 0.85
+    /// Group books by identical ISBN-13.
+    pub fn find_by_isbn(books: &[BookCard]) -> Vec<DuplicateGroup> {
+        let mut groups: HashMap<String, Vec<&BookCard>> = HashMap::new();
+
+        for book in books {
+            if let Some(ids) = &book.identifiers {
+                if let Some(isbn13) = &ids.isbn13 {
+                    // Try to parse to ensure it's fully normalized, fallback to raw string
+                    let normalized = crate::identifiers::isbn::Isbn::parse(isbn13)
+                        .map(|i| i.isbn13)
+                        .unwrap_or_else(|_| isbn13.clone());
+                    groups.entry(normalized).or_default().push(book);
+                } else if let Some(isbn10) = &ids.isbn10 {
+                    let normalized = crate::identifiers::isbn::Isbn::parse(isbn10)
+                        .map(|i| i.isbn13)
+                        .unwrap_or_else(|_| isbn10.clone());
+                    groups.entry(normalized).or_default().push(book);
+                }
+            }
+        }
+
+        Self::build_groups(groups, DedupStrategy::ByIsbn)
+    }
+
+    /// Group books by fuzzy title similarity using Levenshtein distance.
+    pub fn find_by_title_fuzzy(books: &[BookCard]) -> Vec<DuplicateGroup> {
+        let mut groups: Vec<Vec<&BookCard>> = Vec::new();
+        let mut assigned = HashSet::new();
+
+        for (i, book_a) in books.iter().enumerate() {
+            if assigned.contains(&book_a.id) {
+                continue;
+            }
+
+            let title_a = normalize_title(&book_a.metadata.title);
+            if title_a.is_empty() {
+                continue;
+            }
+
+            let mut current_group = vec![book_a];
+            assigned.insert(book_a.id);
+
+            for book_b in books.iter().skip(i + 1) {
+                if assigned.contains(&book_b.id) {
+                    continue;
+                }
+
+                let title_b = normalize_title(&book_b.metadata.title);
+                if title_b.is_empty() {
+                    continue;
+                }
+
+                // Fast path: length difference check to avoid expensive Levenshtein calculations
+                let len_diff = (title_a.len() as isize - title_b.len() as isize).abs();
+                let max_len = title_a.len().max(title_b.len());
+
+                // If lengths differ by more than 10%, they can't have > 0.9 similarity
+                if (len_diff as f32) / (max_len as f32) > 0.1 {
+                    continue;
+                }
+
+                // Calculate Levenshtein similarity
+                let distance = strsim::levenshtein(&title_a, &title_b);
+                let similarity = 1.0 - (distance as f32 / max_len as f32);
+
+                if similarity > 0.9 {
+                    current_group.push(book_b);
+                    assigned.insert(book_b.id);
+                }
+            }
+
+            if current_group.len() > 1 {
+                groups.push(current_group);
+            }
+        }
+
+        groups
+            .into_iter()
+            .map(|group| {
+                let mut ids: Vec<Uuid> = group.into_iter().map(|b| b.id).collect();
+                // Select the first as canonical
+                let canonical = ids.remove(0);
+                DuplicateGroup {
+                    canonical,
+                    duplicates: ids,
+                    strategy: DedupStrategy::ByTitleFuzzy,
+                }
+            })
+            .collect()
+    }
+
+    fn build_groups(
+        groups: HashMap<String, Vec<&BookCard>>,
+        strategy: DedupStrategy,
+    ) -> Vec<DuplicateGroup> {
+        groups
+            .into_values()
+            .filter(|group| group.len() > 1)
+            .map(|group| {
+                let mut ids: Vec<Uuid> = group.into_iter().map(|b| b.id).collect();
+                let canonical = ids.remove(0);
+                DuplicateGroup {
+                    canonical,
+                    duplicates: ids,
+                    strategy: strategy.clone(),
+                }
+            })
+            .collect()
     }
 }
 
-fn title_similarity(s1: &str, s2: &str) -> f32 {
-    let s1 = normalize_title(s1);
-    let s2 = normalize_title(s2);
-    
-    if s1.is_empty() || s2.is_empty() {
-        return 0.0;
+/// Pure function to merge duplicates.
+/// Returns a tuple of (merged_canonical_card, list_of_ids_to_delete).
+/// The caller is responsible for updating the DB and deleting the merged cards.
+pub fn merge_duplicates(canonical: BookCard, to_merge: &[BookCard]) -> Result<(BookCard, Vec<Uuid>)> {
+    let mut merged = canonical.clone();
+    let mut to_delete = Vec::new();
+
+    for card in to_merge {
+        if card.id == merged.id {
+            continue; // Skip canonical itself if erroneously passed
+        }
+        to_delete.push(card.id);
+
+        // Simple merge strategy: collect distinct tags, authors, etc.
+        // Tags
+        for tag in &card.organization.tags {
+            if !merged.organization.tags.contains(tag) {
+                merged.organization.tags.push(tag.clone());
+            }
+        }
+
+        // Authors
+        for author in &card.metadata.authors {
+            if !merged.metadata.authors.contains(author) {
+                merged.metadata.authors.push(author.clone());
+            }
+        }
+
+        // Year: keep canonical's year, or fill if missing
+        if merged.metadata.year.is_none() && card.metadata.year.is_some() {
+            merged.metadata.year = card.metadata.year;
+        }
+
+        // We assume actual detailed merging logic will be expanded alongside Step 12 (Enrichment pipeline)
     }
 
-    if s1 == s2 {
-        return 1.0;
-    }
-
-    // Simple word overlap (Jaccard)
-    let words1: std::collections::HashSet<_> = s1.split_whitespace().collect();
-    let words2: std::collections::HashSet<_> = s2.split_whitespace().collect();
-    
-    let intersection = words1.intersection(&words2).count() as f32;
-    let union = words1.union(&words2).count() as f32;
-    
-    intersection / union
+    Ok((merged, to_delete))
 }
 
 fn normalize_title(s: &str) -> String {
     s.to_lowercase()
         .chars()
         .filter(|c| c.is_alphanumeric() || c.is_whitespace())
-        .collect()
-}
-
-fn author_similarity(a1: &[String], a2: &[String]) -> f32 {
-    if a1.is_empty() || a2.is_empty() {
-        return 0.0;
-    }
-
-    let mut matches = 0;
-    for auth1 in a1 {
-        let auth1_norm = normalize_author(auth1);
-        for auth2 in a2 {
-            let auth2_norm = normalize_author(auth2);
-            if auth1_norm.contains(&auth2_norm) || auth2_norm.contains(&auth1_norm) {
-                matches += 1;
-                break;
-            }
-        }
-    }
-
-    matches as f32 / (a1.len().max(a2.len()) as f32)
-}
-
-fn normalize_author(s: &str) -> String {
-    s.to_lowercase()
-        .chars()
-        .filter(|c| c.is_alphanumeric())
-        .collect()
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use omniscope_core::models::book::BookCard;
+    use omniscope_core::models::identifiers::ScientificIdentifiers;
 
-    #[test]
-    fn test_similarity_doi() {
-        let mut card1 = BookCard::new("Title A");
-        let mut ids1 = omniscope_core::models::ScientificIdentifiers::default();
-        ids1.doi = Some("10.1234/5678".to_string());
-        card1.identifiers = Some(ids1);
-
-        let mut card2 = BookCard::new("Title B");
-        let mut ids2 = omniscope_core::models::ScientificIdentifiers::default();
-        ids2.doi = Some("10.1234/5678".to_string());
-        card2.identifiers = Some(ids2);
-
-        assert_eq!(DuplicateFinder::similarity(&card1, &card2), 1.0);
+    fn create_test_card(title: &str, doi_str: Option<&str>, isbn_str: Option<&str>) -> BookCard {
+        let mut card = BookCard::new(title);
+        
+        if doi_str.is_some() || isbn_str.is_some() {
+            let mut ids = ScientificIdentifiers::default();
+            
+            if let Some(ds) = doi_str {
+                ids.doi = Some(ds.to_string());
+            }
+            if let Some(is) = isbn_str {
+                ids.isbn13 = Some(is.to_string());
+            }
+            
+            card.identifiers = Some(ids);
+        }
+        
+        card
     }
 
     #[test]
-    fn test_similarity_fuzzy() {
-        let mut card1 = BookCard::new("Attention Is All You Need");
-        card1.metadata.authors = vec!["Vaswani".to_string()];
-        card1.metadata.year = Some(2017);
+    fn test_find_by_doi() {
+        let books = vec![
+            create_test_card("Title 1", Some("10.1234/a"), None),
+            create_test_card("Title 2", Some("10.1234/b"), None),
+            create_test_card("Title 1 dup", Some("10.1234/A"), None), // Identical normalized DOI
+            create_test_card("Title 3", Some("10.5678/c"), None),
+            create_test_card("Title 1 dup 2", Some("10.1234/a"), None),
+        ];
 
-        let mut card2 = BookCard::new("Attention is all you need!");
-        card2.metadata.authors = vec!["Vaswani, A.".to_string()];
-        card2.metadata.year = Some(2017);
+        let groups = DuplicateFinder::find_by_doi(&books);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].strategy, DedupStrategy::ByDoi);
+        assert_eq!(groups[0].duplicates.len(), 2); // 1 canonical + 2 dups = 3 items in group
+    }
 
-        assert!(DuplicateFinder::similarity(&card1, &card2) > 0.85);
+    #[test]
+    fn test_find_by_isbn() {
+        let books = vec![
+            create_test_card("Title 1", None, Some("978-0-306-40615-7")), // ISBN-13
+            create_test_card("Title 2", None, Some("0306406152")),        // Equivalent ISBN-10
+            create_test_card("Title 3", None, Some("978-1-111-11111-1")),
+        ];
+
+        let groups = DuplicateFinder::find_by_isbn(&books);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(groups[0].strategy, DedupStrategy::ByIsbn);
+        assert_eq!(groups[0].duplicates.len(), 1);
+    }
+
+    #[test]
+    fn test_find_by_title_fuzzy() {
+        let books = vec![
+            create_test_card("Attention Is All You Need", None, None),
+            create_test_card("Attention is all you need!", None, None),
+            create_test_card("Attention  is all you   need", None, None),
+            create_test_card("BERT: Pre-training of Deep Bidirectional Transformers", None, None),
+            create_test_card("bert pretraining of deep bidirectional transformers", None, None),
+            create_test_card("Some completely unrelated long title", None, None),
+        ];
+
+        let groups = DuplicateFinder::find_by_title_fuzzy(&books);
+        assert_eq!(groups.len(), 2);
+        
+        // One group for Attention... (3 items) and one for BERT... (2 items)
+        let group_sizes: Vec<usize> = groups.iter().map(|g| g.duplicates.len()).collect();
+        assert!(group_sizes.contains(&2)); // 1 canonical + 2 dups = 3
+        assert!(group_sizes.contains(&1)); // 1 canonical + 1 dup = 2
     }
 }
