@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 use std::fmt;
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
@@ -20,7 +22,10 @@ const RECOMMENDATIONS_URL: &str = "https://api.semanticscholar.org/recommendatio
 const CACHE_TTL_SECS: u64 = 7 * 24 * 60 * 60;
 const DEFAULT_FIELDS: &str = "paperId,externalIds,title,abstract,year,authors,citationCount,referenceCount,influentialCitationCount,fieldsOfStudy,isOpenAccess,openAccessPdf,tldr";
 const SEARCH_FIELDS: &str = "paperId,title,year,authors,citationCount";
+const REFERENCE_FIELDS: &str = "paperId,externalIds,title,year,authors";
 const API_KEY_HEADER: HeaderName = HeaderName::from_static("x-api-key");
+#[cfg(test)]
+static TEST_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub struct S2PaperId(String);
@@ -87,6 +92,87 @@ pub struct S2Paper {
     pub is_open_access: bool,
     pub open_access_pdf: Option<S2OpenAccessPdf>,
     pub tldr: Option<S2Tldr>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct S2Reference {
+    pub paper_id: Option<String>,
+    pub external_ids: HashMap<String, String>,
+    pub title: Option<String>,
+    pub year: Option<i32>,
+    pub authors: Vec<S2Author>,
+}
+
+impl S2Reference {
+    pub fn from_json(v: &Value) -> Self {
+        let source = v.get("citedPaper").unwrap_or(v);
+
+        let paper_id = source
+            .get("paperId")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(ToOwned::to_owned);
+
+        let external_ids = source
+            .get("externalIds")
+            .and_then(Value::as_object)
+            .map(|obj| {
+                obj.iter()
+                    .filter_map(|(k, v)| v.as_str().map(|val| (k.clone(), val.to_string())))
+                    .collect::<HashMap<_, _>>()
+            })
+            .unwrap_or_default();
+
+        let title = source
+            .get("title")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(ToOwned::to_owned);
+
+        let year = source
+            .get("year")
+            .and_then(Value::as_i64)
+            .and_then(|n| i32::try_from(n).ok());
+
+        let authors = source
+            .get("authors")
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .map(|author| S2Author {
+                        author_id: author
+                            .get("authorId")
+                            .and_then(Value::as_str)
+                            .map(ToOwned::to_owned),
+                        name: author
+                            .get("name")
+                            .and_then(Value::as_str)
+                            .unwrap_or_default()
+                            .to_string(),
+                    })
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        Self {
+            paper_id,
+            external_ids,
+            title,
+            year,
+            authors,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.paper_id.is_none()
+            && self.title.is_none()
+            && self.external_ids.is_empty()
+            && self.authors.is_empty()
+            && self.year.is_none()
+    }
 }
 
 impl S2Paper {
@@ -315,6 +401,48 @@ impl SemanticScholarSource {
         Ok(out)
     }
 
+    pub async fn fetch_references(&self, id: &S2PaperId) -> Result<Vec<S2Reference>> {
+        let cache_key = format!("references:{}", id.as_str());
+        if let Some(cached) = self.cache.get::<Vec<S2Reference>>(&cache_key).await {
+            return Ok(cached);
+        }
+
+        let mut url = parse_base_url(&self.base_url)?;
+        {
+            let mut segs = url.path_segments_mut().map_err(|_| {
+                ScienceError::Parse("invalid Semantic Scholar base URL".to_string())
+            })?;
+            segs.push("paper");
+            segs.push(id.as_str());
+            segs.push("references");
+        }
+        url.query_pairs_mut()
+            .append_pair("fields", REFERENCE_FIELDS);
+
+        let body = self
+            .client
+            .get_with_headers(url.as_str(), self.auth_headers()?)
+            .await?;
+        let json: Value =
+            serde_json::from_str(&body).map_err(|e| ScienceError::Parse(e.to_string()))?;
+
+        let references = json
+            .get("data")
+            .and_then(Value::as_array)
+            .or_else(|| json.as_array())
+            .map(|items| {
+                items
+                    .iter()
+                    .map(S2Reference::from_json)
+                    .filter(|reference| !reference.is_empty())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        self.cache.set(&cache_key, &references).await;
+        Ok(references)
+    }
+
     pub async fn get_recommendations(&self, paper_id: &str) -> Result<Vec<S2Paper>> {
         let cache_key = format!("recommendations:{paper_id}");
         if let Some(cached) = self.cache.get::<Vec<S2Paper>>(&cache_key).await {
@@ -374,6 +502,22 @@ impl SemanticScholarSource {
             base_url,
             recommendations_base_url,
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_for_tests(base_url: String) -> Self {
+        Self::with_config(
+            base_url,
+            "https://example.invalid/recommendations/v1".to_string(),
+            None,
+            Duration::from_millis(1),
+            Duration::from_secs(60),
+            format!(
+                "semantic_scholar_test_{}_{}",
+                std::process::id(),
+                TEST_COUNTER.fetch_add(1, Ordering::Relaxed)
+            ),
+        )
     }
 
     fn auth_headers(&self) -> Result<HeaderMap> {
@@ -592,5 +736,33 @@ mod tests {
             paper.external_ids.get("ArXiv"),
             Some(&"1706.03762".to_string())
         );
+    }
+
+    #[test]
+    fn parses_reference_entry_from_cited_paper_payload() {
+        let value = json!({
+            "citedPaper": {
+                "paperId": "s2ref",
+                "externalIds": {
+                    "DOI": "10.1000/ref1",
+                    "ArXiv": "1706.03762"
+                },
+                "title": "Attention Is All You Need",
+                "year": 2017,
+                "authors": [{"name": "Ashish Vaswani"}]
+            }
+        });
+
+        let parsed = S2Reference::from_json(&value);
+
+        assert_eq!(parsed.paper_id.as_deref(), Some("s2ref"));
+        assert_eq!(
+            parsed.external_ids.get("DOI"),
+            Some(&"10.1000/ref1".to_string())
+        );
+        assert_eq!(parsed.title.as_deref(), Some("Attention Is All You Need"));
+        assert_eq!(parsed.year, Some(2017));
+        assert_eq!(parsed.authors.len(), 1);
+        assert!(!parsed.is_empty());
     }
 }
