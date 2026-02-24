@@ -2,7 +2,8 @@
 *.swp
 *.swo
 *~
+project_status.md
 .DS_Store
-/.claude/*
+/.claude/
 .env
 /Deep_Learning_1
